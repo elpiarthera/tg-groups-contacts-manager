@@ -22,14 +22,16 @@ export default function TelegramManager() {
   const [downloadUrl, setDownloadUrl] = useState('');
   const [error, setError] = useState('');
 
+  // Log environment variables
+  console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_KEY);
+
   // Fetch groups or contacts from Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError(''); // Reset error on new submit
 
-    console.log('Extracting:', extractType); // For debugging
-    
     try {
       if (extractType === 'groups') {
         // Fetch groups from Supabase
@@ -38,8 +40,6 @@ export default function TelegramManager() {
           .select('*');
         
         if (groupsError) throw groupsError;
-
-        console.log('Fetched Groups:', groupsData); // Debugging fetched data
         setGroups(groupsData); // Set groups data from Supabase
       } else {
         // Fetch contacts from Supabase
@@ -48,13 +48,11 @@ export default function TelegramManager() {
           .select('*');
         
         if (contactsError) throw contactsError;
-
-        console.log('Fetched Contacts:', contactsData); // Debugging fetched data
-        setGroups(contactsData); // Set contacts as groups for extraction
+        setGroups(contactsData); // Set contacts data as groups for extraction
       }
     } catch (err) {
       console.error('Error fetching data:', err.message);
-      setError('Error fetching data from Supabase.'); // Set error for UI
+      setError('Error fetching data from Supabase.');
     } finally {
       setIsLoading(false);
     }
@@ -65,11 +63,7 @@ export default function TelegramManager() {
     setIsLoading(true);
 
     const selectedItems = groups.filter(group => selectedGroups.includes(group.id));
-
-    const csvContent = selectedItems
-      .map(group => `${group.name}, ${group.memberCount || group.phone_number || 'N/A'}`)
-      .join("\n");
-
+    const csvContent = selectedItems.map(group => `${group.name}, ${group.members_count || 'N/A'}`).join("\n");
     const csvBlob = new Blob([csvContent], { type: "text/csv" });
     const csvUrl = URL.createObjectURL(csvBlob);
     setDownloadUrl(csvUrl); // Set the download URL for CSV
@@ -88,25 +82,11 @@ export default function TelegramManager() {
           <AlertTitle>How to get API ID and API Hash</AlertTitle>
           <AlertDescription>
             <ol className="list-decimal list-inside space-y-2">
-              <li>
-                Go to{" "}
-                <a
-                  href="https://my.telegram.org"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-500 hover:underline"
-                >
-                  https://my.telegram.org
-                </a>{" "}
-                and log in with your Telegram account.
-              </li>
+              <li>Go to <a href="https://my.telegram.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">https://my.telegram.org</a> and log in with your Telegram account.</li>
               <li>Click on 'API development tools'.</li>
               <li>Fill in the form with your app details.</li>
               <li>Click on 'Create application'.</li>
-              <li>
-                You'll see your API ID and API Hash on the next page. Use these in
-                the form below.
-              </li>
+              <li>You'll see your API ID and API Hash on the next page. Use these in the form below.</li>
             </ol>
           </AlertDescription>
         </Alert>
@@ -171,21 +151,16 @@ export default function TelegramManager() {
                     if (checked) {
                       setSelectedGroups((prev) => [...prev, group.id]);
                     } else {
-                      setSelectedGroups((prev) =>
-                        prev.filter((id) => id !== group.id)
-                      );
+                      setSelectedGroups((prev) => prev.filter(id => id !== group.id));
                     }
                   }}
                 />
                 <Label htmlFor={`group-${group.id}`}>
-                  {group.name} ({group.memberCount || 'N/A'} members)
+                  {group.name} ({group.members_count || 'N/A'} members)
                 </Label>
               </div>
             ))}
-            <Button
-              onClick={handleExtract}
-              disabled={isLoading || selectedGroups.length === 0}
-            >
+            <Button onClick={handleExtract} disabled={isLoading || selectedGroups.length === 0}>
               {isLoading ? 'Extracting...' : 'Extract Selected Groups'}
             </Button>
           </div>
@@ -194,9 +169,7 @@ export default function TelegramManager() {
       <CardFooter>
         {downloadUrl && (
           <Button asChild>
-            <a href={downloadUrl} download="groups_or_contacts.csv">
-              Download CSV
-            </a>
+            <a href={downloadUrl} download="groups_or_contacts.csv">Download CSV</a>
           </Button>
         )}
       </CardFooter>
