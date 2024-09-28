@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { supabase } from '@/lib/supabase'; // Ensure this path is correct and that supabase.js is properly set up
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,38 +19,49 @@ export default function TelegramManager() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [extractType, setExtractType] = useState('groups');
   const [groups, setGroups] = useState([]);
-  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
   const [error, setError] = useState('');
+  const [user, setUser] = useState(null);
 
-  // Fetch groups or contacts from Supabase
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUser(user);
+      } else {
+        setError('Please log in to access this feature');
+      }
+    };
+    checkUser();
+  }, []);
+
+  // Fetch groups and contacts from Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    setError(''); // Reset error on new submit
 
     try {
-      if (extractType === 'groups') {
-        // Fetch groups from Supabase
-        const { data: groupsData, error: groupsError } = await supabase
-          .from('groups')
-          .select('*');
-        
-        if (groupsError) throw groupsError;
-        setGroups(groupsData); // Set groups data from Supabase
-      } else {
-        // Fetch contacts from Supabase
-        const { data: contactsData, error: contactsError } = await supabase
-          .from('contacts')
-          .select('*');
-        
-        if (contactsError) throw contactsError;
-        setGroups(contactsData); // Set contacts data as groups for extraction
-      }
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('groups')
+        .select('*');
+      
+      if (groupsError) throw groupsError;
+      setGroups(groupsData);
+
+      const { data: contactsData, error: contactsError } = await supabase
+        .from('contacts')
+        .select('*');
+      
+      if (contactsError) throw contactsError;
+      setContacts(contactsData);
+
+      toast.success('Data fetched successfully');
     } catch (err) {
       console.error('Error fetching data:', err.message);
-      setError('Error fetching data from Supabase.');
+      toast.error('Error fetching data from Supabase');
     } finally {
       setIsLoading(false);
     }
@@ -58,13 +71,71 @@ export default function TelegramManager() {
   const handleExtract = () => {
     setIsLoading(true);
 
-    const selectedItems = groups.filter(group => selectedGroups.includes(group.id));
-    const csvContent = selectedItems.map(group => `${group.name}, ${group.members_count || 'N/A'}`).join("\n");
-    const csvBlob = new Blob([csvContent], { type: "text/csv" });
-    const csvUrl = URL.createObjectURL(csvBlob);
-    setDownloadUrl(csvUrl); // Set the download URL for CSV
+    try {
+      const items = extractType === 'groups' ? groups : contacts;
+      const selectedData = items.filter(item => selectedItems.includes(item.id));
+      const csvContent = selectedData.map(item => {
+        if (extractType === 'groups') {
+          return `${item.group_name}, ${item.members_count || 'N/A'}`;
+        } else {
+          return `${item.first_name} ${item.last_name}, ${item.username || 'N/A'}, ${item.phone_number || 'N/A'}`;
+        }
+      }).join("\n");
 
-    setIsLoading(false);
+      const csvBlob = new Blob([csvContent], { type: "text/csv" });
+      const csvUrl = URL.createObjectURL(csvBlob);
+      setDownloadUrl(csvUrl);
+
+      toast.success('CSV generated successfully');
+    } catch (err) {
+      console.error('Error generating CSV:', err.message);
+      toast.error('Error generating CSV');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateUser = async () => {
+    if (!user) {
+      toast.error('Please log in to update your account');
+      return;
+    }
+    setIsLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .update({ api_id: apiId, api_hash: apiHash, phone_number: phoneNumber })
+        .eq('id', user.id);
+      
+      if (error) throw error;
+      toast.success('User updated successfully');
+    } catch (err) {
+      console.error('Error updating user:', err.message);
+      toast.error('Error updating user in Supabase');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!user) {
+      setError('Please log in to delete your account.');
+      return;
+    }
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', user.id);
+    
+    if (error) {
+      console.error('Error deleting user:', error);
+      setError('Error deleting user from Supabase.');
+    } else {
+      console.log('User deleted successfully');
+      setUser(null);
+      // You might want to redirect the user after successful deletion
+    }
   };
 
   return (
@@ -131,33 +202,44 @@ export default function TelegramManager() {
             </div>
           </RadioGroup>
           <Button type="submit" disabled={isLoading}>
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isLoading ? 'Loading...' : 'Fetch Data'}
+          </Button>
+          <Button type="button" onClick={handleUpdateUser} disabled={isLoading}>
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isLoading ? 'Updating...' : 'Update User Data'}
+          </Button>
+          <Button type="button" onClick={handleDeleteUser} disabled={isLoading} className="bg-red-500 hover:bg-red-600">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isLoading ? 'Deleting...' : 'Delete Account'}
           </Button>
         </form>
         {error && <p className="text-red-500">{error}</p>}
-        {groups.length > 0 && (
+        {(groups.length > 0 || contacts.length > 0) && (
           <div className="mt-6 space-y-4">
-            <h3 className="text-lg font-semibold">Select Groups to Extract</h3>
-            {groups.map((group) => (
-              <div key={group.id} className="flex items-center space-x-2">
+            <h3 className="text-lg font-semibold">Select {extractType === 'groups' ? 'Groups' : 'Contacts'} to Extract</h3>
+            {(extractType === 'groups' ? groups : contacts).map((item) => (
+              <div key={item.id} className="flex items-center space-x-2">
                 <Checkbox
-                  id={`group-${group.id}`}
-                  checked={selectedGroups.includes(group.id)}
+                  id={`item-${item.id}`}
+                  checked={selectedItems.includes(item.id)}
                   onCheckedChange={(checked) => {
                     if (checked) {
-                      setSelectedGroups((prev) => [...prev, group.id]);
+                      setSelectedItems((prev) => [...prev, item.id]);
                     } else {
-                      setSelectedGroups((prev) => prev.filter(id => id !== group.id));
+                      setSelectedItems((prev) => prev.filter(id => id !== item.id));
                     }
                   }}
                 />
-                <Label htmlFor={`group-${group.id}`}>
-                  {group.name} ({group.members_count || 'N/A'} members)
+                <Label htmlFor={`item-${item.id}`}>
+                  {extractType === 'groups' 
+                    ? `${item.group_name} (${item.members_count || 'N/A'} members)`
+                    : `${item.first_name} ${item.last_name} (@${item.username || 'N/A'})`}
                 </Label>
               </div>
             ))}
-            <Button onClick={handleExtract} disabled={isLoading || selectedGroups.length === 0}>
-              {isLoading ? 'Extracting...' : 'Extract Selected Groups'}
+            <Button onClick={handleExtract} disabled={isLoading || selectedItems.length === 0}>
+              {isLoading ? 'Extracting...' : `Extract Selected ${extractType === 'groups' ? 'Groups' : 'Contacts'}`}
             </Button>
           </div>
         )}
