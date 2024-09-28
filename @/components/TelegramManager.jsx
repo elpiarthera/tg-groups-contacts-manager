@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { InfoIcon } from 'lucide-react';
+import { API_BASE_URL } from '../utils/config'; // Adjust the path if necessary
 
 export default function TelegramManager() {
   const [apiId, setApiId] = useState('');
@@ -18,35 +19,96 @@ export default function TelegramManager() {
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState('');
+  const [error, setError] = useState(null);
+  const [phoneCode, setPhoneCode] = useState('');
+  const [showPhoneCodeInput, setShowPhoneCodeInput] = useState(false);
+  const [extractedData, setExtractedData] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulating API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    // In a real app, you would make an API call to your backend here
-    setGroups([
-      { id: 1, name: 'Group 1', memberCount: 100 },
-      { id: 2, name: 'Group 2', memberCount: 200 },
-      { id: 3, name: 'Group 3', memberCount: 150 },
-    ]);
-    setIsLoading(false);
+    setError(null);
+    setShowPhoneCodeInput(false);
+    try {
+      const response = await fetch(`${API_BASE_URL}/fetch-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber }),
+      });
+      const data = await response.json();
+      if (response.status === 200) {
+        setGroups(data);
+      } else if (response.status === 403 && data.error === 'Phone code required') {
+        setShowPhoneCodeInput(true);
+      } else {
+        throw new Error(data.error || 'Failed to fetch data');
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError(error.message || 'An error occurred while fetching data');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePhoneCodeSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/fetch-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, phoneCode }),
+      });
+      const data = await response.json();
+      if (response.status === 200) {
+        setGroups(data);
+        setShowPhoneCodeInput(false);
+      } else {
+        throw new Error(data.error || 'Failed to authenticate');
+      }
+    } catch (error) {
+      console.error('Error authenticating:', error);
+      setError(error.message || 'An error occurred during authentication');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleExtract = async () => {
     setIsLoading(true);
-    // Simulating API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    // In a real app, you would make an API call to your backend here
-    setDownloadUrl('https://example.com/download.csv');
-    setIsLoading(false);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/extract-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedGroups }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to extract data');
+      }
+      const data = await response.json();
+      setExtractedData(data.extractedData);
+    } catch (error) {
+      console.error('Error extracting data:', error);
+      setError('Failed to extract data. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>Telegram Groups and Contacts Manager</CardTitle>
+        <CardDescription>Manage your Telegram groups and contacts ethically</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert className="mb-6">
@@ -108,6 +170,32 @@ export default function TelegramManager() {
             {isLoading ? 'Loading...' : 'Fetch Data'}
           </Button>
         </form>
+        
+        {showPhoneCodeInput && (
+          <form onSubmit={handlePhoneCodeSubmit} className="mt-4 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="phone-code">Phone Code</Label>
+              <Input
+                id="phone-code"
+                value={phoneCode}
+                onChange={(e) => setPhoneCode(e.target.value)}
+                required
+                placeholder="Enter the code you received"
+              />
+            </div>
+            <Button type="submit" disabled={isLoading}>
+              {isLoading ? 'Verifying...' : 'Verify Code'}
+            </Button>
+          </form>
+        )}
+
+        {error && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
         {groups.length > 0 && (
           <div className="mt-6 space-y-4">
             <h3 className="text-lg font-semibold">Select Groups to Extract</h3>
@@ -134,14 +222,16 @@ export default function TelegramManager() {
             </Button>
           </div>
         )}
-      </CardContent>
-      <CardFooter>
-        {downloadUrl && (
-          <Button asChild>
-            <a href={downloadUrl} download>Download CSV</a>
-          </Button>
+
+        {extractedData && (
+          <div className="mt-6">
+            <h3 className="text-lg font-semibold">Extracted Data</h3>
+            <pre className="mt-2 p-4 bg-gray-100 rounded overflow-auto">
+              {JSON.stringify(extractedData, null, 2)}
+            </pre>
+          </div>
         )}
-      </CardFooter>
+      </CardContent>
     </Card>
   );
 }

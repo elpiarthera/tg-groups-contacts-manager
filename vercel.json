@@ -4,10 +4,20 @@
     {
       "src": "next.config.js",
       "use": "@vercel/next"
+    },
+    {
+      "src": "main.py",
+      "use": "@vercel/python"
     }
   ],
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "https://oisymxsvkchphdvxucdt.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pc3lteHN2a2NocGhkdnh1Y2R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mjc1MDcyMDYsImV4cCI6MjA0MzA4MzIwNn0.JsGtX4Kaq5g1ySxtT-oBYJNvNZ3LWEX5FOB5cN8wcAs"
-  }
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "main.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
 }
