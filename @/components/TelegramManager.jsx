@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '../lib/supabase'; // Ensure this path is correct and that supabase.js is properly set up
+import { supabase } from '@/lib/supabase'; // Ensure this path is correct and that supabase.js is properly set up
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,10 +21,6 @@ export default function TelegramManager() {
   const [isLoading, setIsLoading] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
   const [error, setError] = useState('');
-
-  // Log environment variables
-  console.log('Supabase URL:', process.env.NEXT_PUBLIC_SUPABASE_URL);
-  console.log('Supabase Key:', process.env.NEXT_PUBLIC_SUPABASE_KEY);
 
   // Fetch groups or contacts from Supabase
   const handleSubmit = async (e) => {

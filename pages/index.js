@@ -1,4 +1,4 @@
-import TelegramManager from '../TelegramManager'
+import TelegramManager from '@/components/TelegramManager'
 
 export default function Home() {
   return (
