@@ -1,13 +1,10 @@
 // next.config.js
 
+const path = require('path');
+
 module.exports = {
-    reactStrictMode: true,
-    env: {
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_KEY: process.env.NEXT_PUBLIC_SUPABASE_KEY,
-    },
-    webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
-        config.resolve.alias['@'] = __dirname;
+    webpack: (config) => {
+        config.resolve.alias['@'] = path.resolve(__dirname);
         return config;
     },
 };
