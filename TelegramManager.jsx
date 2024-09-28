@@ -1,7 +1,7 @@
-'use client'
+'use client';
 
 import { useState } from 'react';
-import { supabase } from '../lib/supabase'; // Correct Supabase import path
+import { supabase } from '../lib/supabase'; // Ensure this path is correct and that supabase.js is properly set up
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
