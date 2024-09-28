@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase'; // Import Supabase client
+import { supabase } from '../lib/supabase'; // Import supabase client
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,7 +9,7 @@ export default function GroupsList() {
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
 
-  // Fetch groups from Supabase
+  // Fetch groups from supabase
   useEffect(() => {
     const fetchGroups = async () => {
       const { data, error } = await supabase

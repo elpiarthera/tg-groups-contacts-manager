@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase'; // Import Supabase client
+import { supabase } from '../lib/supabase'; // Import supabase client
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -9,7 +9,7 @@ export default function ContactsList() {
   const [selectedContacts, setSelectedContacts] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
 
-  // Fetch contacts from Supabase
+  // Fetch contacts from supabase
   useEffect(() => {
     const fetchContacts = async () => {
       const { data, error } = await supabase

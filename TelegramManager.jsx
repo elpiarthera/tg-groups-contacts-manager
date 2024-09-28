@@ -22,7 +22,7 @@ export default function TelegramManager() {
   const [downloadUrl, setDownloadUrl] = useState('');
   const [error, setError] = useState('');
 
-  // Fetch groups or contacts from Supabase
+  // Fetch groups or contacts from supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -30,16 +30,16 @@ export default function TelegramManager() {
 
     try {
       if (extractType === 'groups') {
-        // Fetch groups from Supabase
+        // Fetch groups from supabase
         const { data: groupsData, error: groupsError } = await supabase
           .from('groups')
           .select('*');
         
         if (groupsError) throw groupsError;
 
-        setGroups(groupsData); // Set groups data from Supabase
+        setGroups(groupsData); // Set groups data from supabase
       } else {
-        // Fetch contacts from Supabase
+        // Fetch contacts from supabase
         const { data: contactsData, error: contactsError } = await supabase
           .from('contacts')
           .select('*');
@@ -50,7 +50,7 @@ export default function TelegramManager() {
       }
     } catch (err) {
       console.error('Error fetching data:', err.message);
-      setError('Error fetching data from Supabase.');
+      setError('Error fetching data from supabase.');
     } finally {
       setIsLoading(false);
     }
