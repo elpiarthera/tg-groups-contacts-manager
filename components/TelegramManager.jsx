@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../lib/supabase';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
