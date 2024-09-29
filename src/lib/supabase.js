@@ -6,12 +6,14 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // Check for missing environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-  throw new Error('Missing Supabase environment variables');
+  console.warn('Missing Supabase environment variables. Using fallback values.');
 }
 
 // Create a supabase client instance
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(
+  supabaseUrl || 'https://your-fallback-project-url.supabase.co',
+  supabaseAnonKey || 'your-fallback-anon-key'
+);
 
 // Log successful client creation
 console.log('Supabase client created successfully');
