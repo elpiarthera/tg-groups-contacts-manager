@@ -1,13 +1,41 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 import TelegramManager from '@/components/TelegramManager'
 
 export default function Home() {
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState(null)
+
+  useEffect(() => {
+    const checkSupabaseConnection = async () => {
+      try {
+        const { data, error: supabaseError } = await supabase.from('contacts').select('count', { count: 'exact' })
+        if (supabaseError) throw supabaseError
+        console.log('Supabase connection successful')
+        setIsLoading(false)
+      } catch (error) {
+        console.error('Error connecting to Supabase:', error)
+        setErrorMessage('Failed to connect to the database. Please try again later.')
+        setIsLoading(false)
+      }
+    }
+
+    checkSupabaseConnection()
+  }, [])
+
+  if (isLoading) {
+    return <div>Loading...</div>
+  }
+
+  if (errorMessage) {
+    return <div>Error: {errorMessage}</div>
+  }
+
   return (
-    <div className="container mx-auto py-10">
-      <h1 className="text-3xl font-bold mb-6 text-center">Telegram Groups and Contacts Extractor</h1>
-      <p className="text-center text-lg mb-10">
-        Easily manage and extract data from your Telegram groups and contacts.
-      </p>
+    <main className="flex min-h-screen flex-col items-center justify-between p-24">
       <TelegramManager />
-    </div>
+    </main>
   )
 }

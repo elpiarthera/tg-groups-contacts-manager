@@ -126,9 +126,9 @@ export default function ContactsList() {
               <TableCell>{contact.phone_number}</TableCell>
               <TableCell>{contact.bio}</TableCell>
               <TableCell>
-                <Badge variant={contact.online_status === 'Online' ? 'success' : 'secondary'}>
-                  {contact.online_status}
-                </Badge>
+                <span className={contact.online_status === 'Online' ? 'text-green-500' : 'text-gray-500'}>
+                  {contact.online_status || 'Offline'}
+                </span>
               </TableCell>
             </TableRow>
           ))}
