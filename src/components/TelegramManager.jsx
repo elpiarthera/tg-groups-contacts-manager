@@ -29,21 +29,18 @@ export default function TelegramManager() {
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const text = await response.text();
       console.log('Raw response:', text);
 
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-        throw new Error('Invalid JSON response from server');
+      if (!text) {
+        throw new Error('Empty response from server');
       }
 
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP error! status: ${response.status}`);
-      }
-
+      const data = JSON.parse(text);
       console.log('Data extracted successfully:', data);
       // TODO: Handle successful extraction (e.g., show success message, update UI)
     } catch (error) {
