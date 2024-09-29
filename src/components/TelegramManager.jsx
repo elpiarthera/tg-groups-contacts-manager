@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { InfoIcon } from 'lucide-react';
-import { API_BASE_URL } from '@/utils/config';
+//import { API_BASE_URL } from '@/utils/config';
 import GroupsList from './GroupsList';
 import ContactsList from './ContactsList';
 
