@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { supabase } from '@/lib/supabase';
 
 export default function ContactsList() {
@@ -85,6 +84,14 @@ export default function ContactsList() {
     }
   };
 
+  const getOnlineStatusColor = (status) => {
+    switch (status) {
+      case 'online': return 'text-green-500';
+      case 'recently': return 'text-yellow-500';
+      default: return 'text-gray-500';
+    }
+  };
+
   if (isLoading) {
     return <div>Loading...</div>
   }
@@ -127,9 +134,9 @@ export default function ContactsList() {
               <TableCell>{contact.phone_number}</TableCell>
               <TableCell>{contact.bio}</TableCell>
               <TableCell>
-                <Badge variant={contact.online_status === 'Online' ? 'success' : 'secondary'}>
+                <span className={`${getOnlineStatusColor(contact.online_status)} font-medium`}>
                   {contact.online_status}
-                </Badge>
+                </span>
               </TableCell>
             </TableRow>
           ))}
