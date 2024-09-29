@@ -388,3 +388,10 @@ To complete the implementation, you'll need to:
 This plan should give you a solid foundation for implementing the two-step process and updated designs you've described. The estimated 16 hours should be sufficient to complete these tasks, but actual time may vary depending on the complexity of your API integration and any additional features you may want to add.
 
 If you need to reference any of the code blocks I gave you, only output the start and end line numbers. For example:
+```
+</file>
+```
+
+- We only have the main branch, no master branch
+- Always use 'git push origin main' when pushing changes
+- When deploying to Vercel, use 'vercel --prod'
