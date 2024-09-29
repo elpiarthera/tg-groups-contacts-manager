@@ -17,6 +17,34 @@ import { Checkbox } from "@/components/ui/checkbox";
 export default function TelegramManager() {
   // ... (state and functions remain the same)
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setCsvUrl(data.csvUrl);
+        // Handle successful extraction (e.g., show success message, update UI)
+      } else {
+        throw new Error(data.error || 'Failed to extract data');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Card className="w-full max-w-4xl mx-auto">
       <CardHeader>
