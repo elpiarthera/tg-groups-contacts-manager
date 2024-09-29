@@ -44,23 +44,20 @@ export default function TelegramManager() {
           apiHash,
           phoneNumber,
           extractType,
-          page,
-          pageSize: 50,
-          userId: 'tempUserId', // Replace with actual user ID when auth is implemented
+          page: 1, // Start with the first page
+          pageSize: 50, // You can adjust this as needed
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to fetch data');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      // Store credentials in localStorage
-      localStorage.setItem('telegramCredentials', JSON.stringify({ apiId, apiHash, phoneNumber }));
+      const { extractedData, totalCount, hasMore, currentPage } = await response.json();
+      console.log('Fetched data:', extractedData);
+      // Handle the fetched data here (e.g., update state, navigate to a new page, etc.)
+      // You might want to store totalCount, hasMore, and currentPage for pagination controls
 
-      // Redirect to the appropriate page
-      window.location.href = extractType === 'groups' ? '/groups' : '/contacts';
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(error.message || 'An error occurred while fetching data');

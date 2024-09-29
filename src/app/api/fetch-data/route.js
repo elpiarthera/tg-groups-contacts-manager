@@ -1,9 +1,6 @@
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { supabase } from '../../../lib/supabase';
-import { Api, FloodWaitError } from 'telegram';
-import { generateCSV } from '../../../lib/csvUtils';
-import { checkRateLimit, handleTelegramError, handleSupabaseError } from '../../../lib/apiUtils';
+import { TelegramClient } from 'telethon';
+import { StringSession } from 'telethon/sessions';
+import { Api } from 'telethon/tl';
 
 export async function POST(req) {
   console.log("Received fetch-data request");
@@ -15,10 +12,8 @@ export async function POST(req) {
   }
 
   try {
-    checkRateLimit();
-
-    const { apiId, apiHash, phoneNumber, extractType, page = 1, pageSize = 50, userId } = await req.json();
-    if (!apiId || !apiHash || !phoneNumber || !extractType || !userId) {
+    const { apiId, apiHash, phoneNumber, extractType, page = 1, pageSize = 50 } = await req.json();
+    if (!apiId || !apiHash || !phoneNumber || !extractType) {
       throw new Error('Missing required parameters');
     }
 
@@ -27,20 +22,19 @@ export async function POST(req) {
     });
 
     await client.connect();
+    // In a real-world scenario, you'd need to handle user authentication here
+    // For now, we'll assume the user is already authenticated
 
     let extractedData, totalCount, hasMore;
     if (extractType === 'groups') {
       ({ data: extractedData, totalCount, hasMore } = await extractGroups(client, page, pageSize));
     } else if (extractType === 'contacts') {
       ({ data: extractedData, totalCount, hasMore } = await extractContacts(client, page, pageSize));
+    } else {
+      throw new Error('Invalid extract type');
     }
 
     await client.disconnect();
-
-    await storeDataInSupabase(extractType, extractedData, userId);
-
-    const csv = generateCSV(extractedData, getFields(extractType));
-    const csvUrl = await storeCSVInSupabase(csv, extractType);
 
     return new Response(JSON.stringify({ extractedData, totalCount, hasMore, currentPage: page }), {
       status: 200,
@@ -79,7 +73,8 @@ async function extractGroups(client, page, pageSize) {
         banned_rights: fullGroup.fullChat.bannedRights || 'N/A',
       });
     } catch (error) {
-      await handleTelegramError(error);
+      console.error('Error fetching group details:', error);
+      // Handle specific errors here if needed
     }
   }
 
@@ -108,10 +103,11 @@ async function extractContacts(client, page, pageSize) {
         bio: fullContact.about || 'N/A',
         profile_photo_url: fullContact.profilePhoto?.photoId || 'N/A',
         online_status: contact.status || 'Unknown',
-        is_bot: contact.isBot || false,
+        is_bot: contact.bot || false,
       });
     } catch (error) {
-      await handleTelegramError(error);
+      console.error('Error fetching contact details:', error);
+      // Handle specific errors here if needed
     }
   }
 
@@ -120,41 +116,4 @@ async function extractContacts(client, page, pageSize) {
     totalCount: contacts.length,
     hasMore: contacts.length > page * pageSize
   };
-}
-
-async function storeDataInSupabase(extractType, data, userId) {
-  try {
-    const { error } = await supabase.from(extractType).upsert(
-      data.map(item => ({ ...item, owner_id: userId })),
-      { onConflict: ['owner_id', extractType === 'groups' ? 'group_id' : 'id'] }
-    );
-    if (error) throw error;
-  } catch (error) {
-    handleSupabaseError(error);
-  }
-}
-
-async function storeCSVInSupabase(csv, extractType) {
-  const fileName = `${extractType}_${Date.now()}.csv`;
-  try {
-    const { data, error } = await supabase.storage
-      .from('csv-exports')
-      .upload(fileName, csv, { contentType: 'text/csv' });
-    if (error) throw error;
-
-    const { publicURL, error: urlError } = supabase.storage
-      .from('csv-exports')
-      .getPublicUrl(fileName);
-    if (urlError) throw urlError;
-
-    return publicURL;
-  } catch (error) {
-    handleSupabaseError(error);
-  }
-}
-
-function getFields(extractType) {
-  return extractType === 'groups'
-    ? ['group_name', 'group_id', 'group_url', 'description', 'participant_count', 'creation_date', 'admin_rights', 'banned_rights']
-    : ['id', 'first_name', 'last_name', 'username', 'phone_number', 'bio', 'profile_photo_url', 'online_status', 'is_bot'];
 }
