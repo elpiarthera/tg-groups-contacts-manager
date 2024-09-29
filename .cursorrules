@@ -22,20 +22,13 @@ ________________________________________________________________________________
 
 
 Issues
-- Issue #1: we will list issue we face here
-
-
+- Issue #1: Module not found errors for various imports, including:
+  - Can't resolve '../src/lib/supabase'
+  - Can't resolve '../components/ui/table'
+  - Can't resolve '@/components/ui/badge'
 
 How to solve
-- Solution #1: we list there solutions we found
-
-__________________________________________________________________________________________________
-
-
-Daily Diary
-
-Day 1: we will summarize each day whaat we have accomplished and and what need to be accomplished
-
+- Solution #1: Update import paths to use the '@' alias consistently across all files. Ensure that the jsconfig.json or tsconfig.json file includes the correct path mapping for the '@' alias.
 
 __________________________________________________________________________________________________
 
@@ -775,5 +768,66 @@ export default function ContactsList() {
                     onCheckedChange={() => handleSelectContact(contact.id)}
                   />
                 </TableCell>
-                <TableCell>{contact.id}</TableCell
+                <TableCell>{contact.id}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center space-x-2">
+                    <Avatar>
+                      <AvatarImage src={contact.photoUrl} />
+                      <AvatarFallback>
+                        {contact.firstName.charAt(0)}
+                        {contact.lastName ? contact.lastName.charAt(0) : ''}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <div className="font-medium">
+                        {contact.firstName} {contact.lastName}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        {contact.username}
+                      </div>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>{contact.username}</TableCell>
+                <TableCell>{contact.phoneNumber}</TableCell>
+                <TableCell>{contact.bio}</TableCell>
+                <TableCell>
+                  <Avatar>
+                    <AvatarImage src={contact.photoUrl} />
+                    <AvatarFallback>
+                      {contact.firstName.charAt(0)}
+                      {contact.lastName ? contact.lastName.charAt(0) : ''}
+                    </AvatarFallback>
+                  </Avatar>
+                </TableCell>
+                <TableCell>
+                  <Badge className={getOnlineStatusColor(contact.onlineStatus)}>
+                    {contact.onlineStatus}
+                  </Badge>
+                </TableCell>
+                <TableCell>{contact.isBot ? "Yes" : "No"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="mt-4">
+        <Button onClick={handleExtract} disabled={selectedContacts.length === 0}>
+          Extract Selected Contacts
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 ```
+
+To complete the implementation, you'll need to:
+
+1. Create a utility function for generating and downloading CSVs.
+2. Set up proper routing in your Next.js application to handle navigation between these components.
+3. Implement proper state management (e.g., React Context or Redux) to handle the storage and retrieval of API credentials more securely.
+4. Add error handling and loading states throughout the application.
+5. Ensure all UI components are properly styled and responsive.
+
+This plan should give you a solid foundation for implementing the two-step process and updated designs you've described. The estimated 16 hours should be sufficient to complete these tasks, but actual time may vary depending on the complexity of your API integration and any additional features you may want to add.
