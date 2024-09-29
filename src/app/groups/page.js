@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function GroupsList() {
   const [groups, setGroups] = useState([]);
@@ -22,6 +24,7 @@ export default function GroupsList() {
     }
 
     const fetchGroups = async () => {
+      setIsLoading(true);
       try {
         const { data, error } = await supabase
           .from('groups')
@@ -53,6 +56,11 @@ export default function GroupsList() {
     );
   };
 
+  const handleDownloadCSV = () => {
+    // Implement CSV download logic here
+    console.log('Downloading CSV for selected groups:', selectedGroups);
+  };
+
   if (isLoading) {
     return <div>Loading...</div>
   }
@@ -66,6 +74,41 @@ export default function GroupsList() {
         </Alert>
       )}
       <h2 className="text-2xl font-bold mb-4">Groups List</h2>
+      <div className="mb-4 space-y-2">
+        <div>
+          <Label htmlFor="api-id">API ID</Label>
+          <Input
+            id="api-id"
+            type="text"
+            placeholder="Enter your API ID"
+            value={apiId}
+            onChange={(e) => setApiId(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="api-hash">API Hash</Label>
+          <Input
+            id="api-hash"
+            type="text"
+            placeholder="Enter your API Hash"
+            value={apiHash}
+            onChange={(e) => setApiHash(e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="phone-number">Phone Number</Label>
+          <Input
+            id="phone-number"
+            type="text"
+            placeholder="Enter your phone number"
+            value={phoneNumber}
+            onChange={(e) => setPhoneNumber(e.target.value)}
+          />
+        </div>
+        <Button onClick={handleFetchFromTelegram} disabled={isFetchingFromTelegram}>
+          {isFetchingFromTelegram ? 'Fetching...' : 'Fetch Groups from Telegram'}
+        </Button>
+      </div>
       <Checkbox
         id="select-all"
         checked={selectAll}

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export default function ContactsList() {
   const [contacts, setContacts] = useState([]);
@@ -15,71 +17,67 @@ export default function ContactsList() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchError = localStorage.getItem('fetchError');
-    if (fetchError) {
-      setError(fetchError);
-      localStorage.removeItem('fetchError');
-    }
-
-    const fetchContacts = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('contacts')
-          .select('*');
-        
-        if (error) throw error;
-        setContacts(data);
-      } catch (error) {
-        console.error('Error fetching contacts:', error);
-        setError('Failed to load contacts. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchContacts();
   }, []);
 
-  const handleSelectAll = () => {
-    setSelectAll(!selectAll);
-    setSelectedContacts(selectAll ? [] : contacts.map(contact => contact.id));
+  const fetchContacts = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from('contacts').select('*');
+      if (error) throw error;
+      setContacts(data);
+    } catch (error) {
+      console.error('Error fetching contacts:', error);
+      setError('Failed to fetch contacts. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSelectAll = (checked) => {
+    if (checked) {
+      setSelectedContacts(contacts.map(contact => contact.id));
+    } else {
+      setSelectedContacts([]);
+    }
   };
 
   const handleSelectContact = (contactId) => {
-    setSelectedContacts(prevSelected =>
-      prevSelected.includes(contactId)
-        ? prevSelected.filter(id => id !== contactId)
-        : [...prevSelected, contactId]
+    setSelectedContacts(prev =>
+      prev.includes(contactId)
+        ? prev.filter(id => id !== contactId)
+        : [...prev, contactId]
     );
   };
 
-  if (isLoading) {
-    return <div>Loading...</div>
-  }
+  const handleDownloadCSV = () => {
+    // Implement CSV download logic here
+    console.log('Downloading CSV for selected contacts:', selectedContacts);
+  };
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
 
   return (
     <div className="container mx-auto py-10">
-      {error && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTitle>Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-      <h2 className="text-2xl font-bold mb-4">Contacts List</h2>
-      <Checkbox
-        id="select-all"
-        checked={selectAll}
-        onCheckedChange={handleSelectAll}
-        label={selectAll ? "Unselect All" : "Select All"}
-      />
+      <h1 className="text-2xl font-bold mb-4">Telegram Contacts</h1>
+      <div className="mb-4">
+        <Button onClick={handleDownloadCSV} disabled={selectedContacts.length === 0}>
+          Download Selected Contacts
+        </Button>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Select</TableHead>
+            <TableHead className="w-[100px]">
+              <Checkbox
+                checked={selectedContacts.length === contacts.length}
+                onCheckedChange={handleSelectAll}
+              />
+            </TableHead>
             <TableHead>Name</TableHead>
-            <TableHead>Username</TableHead>
             <TableHead>Phone</TableHead>
-            <TableHead>Bio</TableHead>
+            <TableHead>Username</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -91,15 +89,13 @@ export default function ContactsList() {
                   onCheckedChange={() => handleSelectContact(contact.id)}
                 />
               </TableCell>
-              <TableCell>{`${contact.first_name} ${contact.last_name}`}</TableCell>
-              <TableCell>@{contact.username || 'N/A'}</TableCell>
-              <TableCell>{contact.phone_number || 'N/A'}</TableCell>
-              <TableCell>{contact.bio || 'N/A'}</TableCell>
+              <TableCell>{contact.name}</TableCell>
+              <TableCell>{contact.phone}</TableCell>
+              <TableCell>{contact.username}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-      <Button onClick={() => console.log("Selected contacts:", selectedContacts)}>Extract Selected Contacts</Button>
     </div>
   );
 }
