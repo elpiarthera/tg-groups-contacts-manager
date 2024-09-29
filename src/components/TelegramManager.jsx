@@ -55,16 +55,12 @@ export default function TelegramManager() {
       }
 
       const data = await response.json();
-      setTotalCount(data.totalCount);
-      setHasMore(data.hasMore);
+      
+      // Store credentials in localStorage
+      localStorage.setItem('telegramCredentials', JSON.stringify({ apiId, apiHash, phoneNumber }));
 
-      if (extractType === 'groups') {
-        setGroups(prevGroups => [...prevGroups, ...data.extractedData]);
-      } else {
-        setContacts(prevContacts => [...prevContacts, ...data.extractedData]);
-      }
-
-      setStep('selection');
+      // Redirect to the appropriate page
+      window.location.href = extractType === 'groups' ? '/groups' : '/contacts';
     } catch (error) {
       console.error('Error fetching data:', error);
       setError(error.message || 'An error occurred while fetching data');

@@ -1,3 +1,5 @@
+'use client'
+
 import { useState, useEffect } from 'react';
 import { supabase } from '../src/lib/supabase';
 import { Button } from "@/components/ui/button";

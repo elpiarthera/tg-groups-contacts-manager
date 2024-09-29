@@ -1,0 +1,29 @@
+[33mcommit 0c4a6a78842080bd0ac714787d69edec6ceac27e[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:22:28 2024 +0200
+
+    Update Telegram Manager, API routes, and fix import issues
+
+[33mcommit c20606efa3fa1e932967e5baf031e0a6dfa6b53d[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:18:50 2024 +0200
+
+    Update Supabase configuration and environment variables
+
+[33mcommit a5d9c7bb05f8a7beb5fb316ad357f0eef5f12991[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:09:40 2024 +0200
+
+    MVP version ready for testing
+
+[33mcommit 490e6a289dc8cd158ea7e75ba71296654f22d72f[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sat Sep 28 23:13:04 2024 +0200
+
+    Configured API base URL and updated imports
+
+[33mcommit de148b641169912ee3170388a55706c45580e55e[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sat Sep 28 22:30:27 2024 +0200
+
+    Updated TelegramManager to allow direct API ID, API Hash, and Phone Number submission
