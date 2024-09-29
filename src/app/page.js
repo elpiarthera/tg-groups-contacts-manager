@@ -11,8 +11,8 @@ export default function Home() {
   useEffect(() => {
     const checkSupabaseConnection = async () => {
       try {
-        const { data, error: supabaseError } = await supabase.from('contacts').select('count', { count: 'exact' })
-        if (supabaseError) throw supabaseError
+        const { data, error } = await supabase.from('contacts').select('count', { count: 'exact' })
+        if (error) throw error
         console.log('Supabase connection successful')
         setIsLoading(false)
       } catch (error) {
