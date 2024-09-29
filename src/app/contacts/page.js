@@ -5,23 +5,35 @@ import { supabase } from '@/lib/supabase';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function ContactsList() {
   const [contacts, setContacts] = useState([]);
   const [selectedContacts, setSelectedContacts] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch contacts from supabase
   useEffect(() => {
+    const fetchError = localStorage.getItem('fetchError');
+    if (fetchError) {
+      setError(fetchError);
+      localStorage.removeItem('fetchError');
+    }
+
     const fetchContacts = async () => {
-      const { data, error } = await supabase
-        .from('contacts') // Fetch from the "contacts" table
-        .select('*');
-      
-      if (error) {
+      try {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*');
+        
+        if (error) throw error;
+        setContacts(data);
+      } catch (error) {
         console.error('Error fetching contacts:', error);
-      } else {
-        setContacts(data); // Set the fetched data into state
+        setError('Failed to load contacts. Please try again.');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -41,8 +53,18 @@ export default function ContactsList() {
     );
   };
 
+  if (isLoading) {
+    return <div>Loading...</div>
+  }
+
   return (
     <div className="container mx-auto py-10">
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <h2 className="text-2xl font-bold mb-4">Contacts List</h2>
       <Checkbox
         id="select-all"
