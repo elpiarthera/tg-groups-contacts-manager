@@ -2,17 +2,19 @@ import { createClient } from '@supabase/supabase-js';
 
 // Read the environment variables
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_KEY;
 
 // Check for missing environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Missing Supabase environment variables. Using fallback values.');
+  console.error('Missing Supabase environment variables');
+} else {
+  console.log('Supabase environment variables loaded successfully');
 }
 
 // Create a supabase client instance
 export const supabase = createClient(
-  supabaseUrl || 'https://your-fallback-project-url.supabase.co',
-  supabaseAnonKey || 'your-fallback-anon-key'
+  supabaseUrl,
+  supabaseAnonKey
 );
 
 // Log successful client creation

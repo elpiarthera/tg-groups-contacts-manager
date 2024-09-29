@@ -46,6 +46,8 @@ export async function POST(req) {
         phone_number: contact.phone,
         username: contact.username,
       }));
+    } else {
+      throw new Error(`Invalid extractType: ${extractType}`);
     }
 
     await client.disconnect();
@@ -64,6 +66,9 @@ export async function POST(req) {
     });
   } catch (error) {
     console.error('Error in extract-data API:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || 'An unknown error occurred'
+    }, { status: 500 });
   }
 }
