@@ -1,9 +1,9 @@
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '../../../lib/supabase';
 import { Api, FloodWaitError } from 'telegram';
-import { generateCSV } from '@/lib/csvUtils';
-import { checkRateLimit, handleTelegramError, handleSupabaseError } from '@/lib/apiUtils';
+import { generateCSV } from '../../../lib/csvUtils';
+import { checkRateLimit, handleTelegramError, handleSupabaseError } from '../../../lib/apiUtils';
 
 export async function POST(req) {
   console.log("Received fetch-data request");
