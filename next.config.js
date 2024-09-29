@@ -1,12 +1,11 @@
-const path = require('path');
+import withPWA from 'next-pwa';
 
-/** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
-    webpack: (config) => {
-        config.resolve.alias['@'] = path.join(__dirname, 'src');
-        return config;
-    },
-}
+};
 
-module.exports = nextConfig
+export default withPWA({
+    dest: 'public',
+    register: true,
+    skipWaiting: true,
+})(nextConfig);
