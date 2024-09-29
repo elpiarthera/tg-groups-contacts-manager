@@ -23,31 +23,31 @@ export default function TelegramManager() {
   const [phoneCode, setPhoneCode] = useState('');
   const [showPhoneCodeInput, setShowPhoneCodeInput] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
+  const [csvUrl, setCsvUrl] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsLoading(true);
     setError(null);
-    setShowPhoneCodeInput(false);
+    setIsLoading(true);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/fetch-data`, {
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
       });
+
       const data = await response.json();
-      if (response.status === 200) {
-        setGroups(data);
-      } else if (response.status === 403 && data.error === 'Phone code required') {
-        setShowPhoneCodeInput(true);
+
+      if (response.ok) {
+        setCsvUrl(data.csvUrl);
+        // Handle successful extraction (e.g., show success message, update UI)
       } else {
-        throw new Error(data.error || 'Failed to fetch data');
+        throw new Error(data.error || 'Failed to extract data');
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
-      setError(error.message || 'An error occurred while fetching data');
+      console.error('Error:', error);
+      // Handle error (e.g., show error message to user)
     } finally {
       setIsLoading(false);
     }
@@ -96,6 +96,7 @@ export default function TelegramManager() {
       }
       const data = await response.json();
       setExtractedData(data.extractedData);
+      setCsvUrl(data.csvUrl); // Set the CSV URL received from the API
     } catch (error) {
       console.error('Error extracting data:', error);
       setError('Failed to extract data. Please try again.');
@@ -147,7 +148,7 @@ export default function TelegramManager() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone-number">Phone Number</Label>
+            <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
             <Input
               id="phone-number"
               value={phoneNumber}
@@ -230,6 +231,12 @@ export default function TelegramManager() {
               {JSON.stringify(extractedData, null, 2)}
             </pre>
           </div>
+        )}
+
+        {csvUrl && (
+          <a href={csvUrl} download className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2 mt-4">
+            Download CSV
+          </a>
         )}
       </CardContent>
     </Card>

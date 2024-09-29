@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint": "next lint"
   },
   "author": "ElPi",
   "license": "MIT",
@@ -28,12 +28,15 @@
     "@radix-ui/react-slot": "^1.1.0",
     "@supabase/supabase-js": "^2.45.4",
     "class-variance-authority": "^0.7.0",
+    "csv-stringify": "^6.5.1",
     "date-fns": "^4.1.0",
+    "json2csv": "^6.0.0-alpha.2",
     "lucide-react": "^0.446.0",
     "next": "^14.2.13",
     "prop-types": "^15.8.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-hot-toast": "^2.4.1"
+    "react-hot-toast": "^2.4.1",
+    "telegram": "^2.25.11"
   }
 }

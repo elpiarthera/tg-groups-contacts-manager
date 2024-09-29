@@ -5,14 +5,20 @@ from telethon.errors import FloodWaitError
 from telethon.tl.functions.messages import ExportChatInviteRequest
 import os
 import csv
-import time
-import random
+from io import StringIO
 from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv()  # Load environment variables from .env file
 
 app = FastAPI()
 
+# Fetch environment variables
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
 # Initialize Supabase client
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 class TelegramCredentials(BaseModel):
     api_id: str
@@ -60,32 +66,37 @@ async def extract_data(request: ExtractionRequest):
         groups = await client.get_dialogs()
         selected_groups = [g for g in groups if g.id in request.selected_groups]
         
-        filename = f"telegram_{request.extract_type}.csv"
-        with open(filename, mode='w', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(['Group Name', 'Group ID', 'Member Name', 'Username', 'User ID'])
-            
-            for group in selected_groups:
-                participants = await client.get_participants(group)
-                for user in participants:
-                    writer.writerow([group.name, group.id, user.first_name, user.username, user.id])
-                    
-                    # Store the extracted data in Supabase
-                    supabase.table("extracted_data").insert({
-                        "group_name": group.name,
-                        "group_id": group.id,
-                        "member_name": user.first_name,
-                        "username": user.username,
-                        "user_id": user.id
-                    }).execute()
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Group Name', 'Group ID', 'Member Name', 'Username', 'User ID'])
         
-        # In a real-world scenario, you'd upload this file to a cloud storage
-        # and return a download URL. For now, we'll just return a placeholder.
-        return {"downloadUrl": f"/downloads/{filename}"}
+        for group in selected_groups:
+            participants = await client.get_participants(group)
+            for user in participants:
+                writer.writerow([group.name, group.id, user.first_name, user.username, user.id])
+                
+                # Store the extracted data in Supabase
+                supabase.table("extracted_data").insert({
+                    "group_name": group.name,
+                    "group_id": group.id,
+                    "member_name": user.first_name,
+                    "username": user.username,
+                    "user_id": user.id
+                }).execute()
+        
+        # Reset the pointer of the StringIO object
+        output.seek(0)
+        
+        # Upload the CSV content to Supabase Storage
+        storage_response = supabase.storage.from_('my-bucket').upload(
+            f"telegram_{request.extract_type}.csv",
+            output.getvalue(),
+            file_options={"content-type": "text/csv"}
+        )
+        
+        # Get the public URL of the uploaded file
+        public_url = supabase.storage.from_('my-bucket').get_public_url(f"telegram_{request.extract_type}.csv")
+
+        return {"downloadUrl": public_url}
     finally:
         await client.disconnect()
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-    
