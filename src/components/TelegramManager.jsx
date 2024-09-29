@@ -16,45 +16,32 @@ export default function TelegramManager() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [extractType, setExtractType] = useState('groups');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
   const router = useRouter();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
     setIsLoading(true);
-    
+
     try {
       const response = await fetch('/api/fetch-data', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const data = await response.json();
-      
-      // Store the error in localStorage if there is one
-      if (data.error) {
-        localStorage.setItem('fetchError', data.error);
-      } else {
-        localStorage.removeItem('fetchError');
-      }
 
-      // Redirect based on the extract type
-      if (extractType === 'groups') {
-        router.push('/groups');
+      if (response.ok) {
+        // Redirect to the appropriate page based on extractType
+        router.push(`/${extractType}`);
       } else {
-        router.push('/contacts');
+        throw new Error(data.error || 'Failed to fetch data');
       }
     } catch (error) {
       console.error('Error:', error);
-      localStorage.setItem('fetchError', error.message);
-      // Redirect even if there's an error
-      router.push(extractType === 'groups' ? '/groups' : '/contacts');
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -82,38 +69,59 @@ export default function TelegramManager() {
           </AlertDescription>
         </Alert>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label htmlFor="apiId">API ID</Label>
-            <Input id="apiId" value={apiId} onChange={(e) => setApiId(e.target.value)} required />
+          <div className="space-y-2">
+            <Label htmlFor="api-id">API ID</Label>
+            <Input
+              id="api-id"
+              value={apiId}
+              onChange={(e) => setApiId(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API ID"
+            />
           </div>
-          <div>
-            <Label htmlFor="apiHash">API Hash</Label>
-            <Input id="apiHash" value={apiHash} onChange={(e) => setApiHash(e.target.value)} required />
+          <div className="space-y-2">
+            <Label htmlFor="api-hash">API Hash</Label>
+            <Input
+              id="api-hash"
+              value={apiHash}
+              onChange={(e) => setApiHash(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API Hash"
+            />
           </div>
-          <div>
-            <Label htmlFor="phoneNumber">Phone Number</Label>
-            <Input id="phoneNumber" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} required />
+          <div className="space-y-2">
+            <Label htmlFor="phone-number">Phone Number</Label>
+            <Input
+              id="phone-number"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your phone number (with country code, e.g. +123456789)"
+            />
           </div>
           <RadioGroup value={extractType} onValueChange={setExtractType}>
             <div className="flex items-center space-x-2">
-              <RadioGroupItem value="groups" id="groups" />
+              <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
               <Label htmlFor="groups">Extract Groups</Label>
             </div>
             <div className="flex items-center space-x-2">
-              <RadioGroupItem value="contacts" id="contacts" />
+              <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
               <Label htmlFor="contacts">Extract Contacts</Label>
             </div>
           </RadioGroup>
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
           <Button type="submit" disabled={isLoading}>
-            {isLoading ? 'Loading...' : 'Fetch Data'}
+            {isLoading ? 'Fetching...' : 'Fetch Data'}
           </Button>
         </form>
-        {error && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
       </CardContent>
     </Card>
   );

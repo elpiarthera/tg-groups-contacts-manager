@@ -4,41 +4,33 @@ import { useState, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { format } from 'date-fns'
+import { supabase } from '@/lib/supabase'
 
 export default function GroupsList() {
   const [groups, setGroups] = useState([])
   const [selectedGroups, setSelectedGroups] = useState([])
   const [selectAll, setSelectAll] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     const fetchGroups = async () => {
-      const credentials = JSON.parse(localStorage.getItem('telegramCredentials'))
-      
       try {
-        const response = await fetch('/api/fetch-groups', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(credentials),
-        })
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch groups')
-        }
-
-        const data = await response.json()
-        setGroups(data)
+        const { data, error } = await supabase
+          .from('groups')
+          .select('*');
+        
+        if (error) throw error;
+        setGroups(data);
       } catch (error) {
-        console.error('Error fetching groups:', error)
+        console.error('Error fetching groups:', error);
+        setError('Failed to load groups. Please try again.');
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    fetchGroups()
+    fetchGroups();
   }, [])
 
   const handleSelectAll = () => {
@@ -56,34 +48,46 @@ export default function GroupsList() {
 
   const handleExtract = async () => {
     try {
-      const response = await fetch('/api/extract-groups', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ selectedGroups }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to extract groups')
-      }
-
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.style.display = 'none'
-      a.href = url
-      a.download = 'extracted_groups.csv'
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
+      const selectedData = groups.filter(group => selectedGroups.includes(group.id));
+      const csvContent = generateCSV(selectedData);
+      downloadCSV(csvContent, 'extracted_groups.csv');
     } catch (error) {
-      console.error('Error extracting groups:', error)
+      console.error('Error extracting groups:', error);
+      setError('Failed to extract groups. Please try again.');
     }
-  }
+  };
+
+  const generateCSV = (data) => {
+    const headers = ['ID', 'Group Name', 'Description', 'Invite Link'];
+    const rows = data.map(group => [
+      group.id,
+      group.group_name,
+      group.description,
+      group.invite_link
+    ]);
+    return [headers, ...rows].map(row => row.join(',')).join('\n');
+  };
+
+  const downloadCSV = (content, fileName) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
 
   if (isLoading) {
     return <div>Loading...</div>
+  }
+
+  if (error) {
+    return <div>Error: {error}</div>
   }
 
   return (
