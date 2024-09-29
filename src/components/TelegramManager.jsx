@@ -16,13 +16,11 @@ export default function TelegramManager() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [extractType, setExtractType] = useState('groups');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
   const router = useRouter();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
-    setError(null);
     
     try {
       const response = await fetch('/api/fetch-data', {
@@ -34,21 +32,29 @@ export default function TelegramManager() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       
+      // Store the error in localStorage if there is one
+      if (data.error) {
+        localStorage.setItem('fetchError', data.error);
+      } else {
+        localStorage.removeItem('fetchError');
+      }
+
       // Redirect based on the extract type
-      if (data.extractType === 'groups') {
+      if (extractType === 'groups') {
         router.push('/groups');
       } else {
         router.push('/contacts');
       }
     } catch (error) {
-      console.error('Error fetching data:', error);
-      setError(error.message);
+      console.error('Error:', error);
+      localStorage.setItem('fetchError', error.message);
+      // Redirect even if there's an error
+      router.push(extractType === 'groups' ? '/groups' : '/contacts');
     } finally {
       setIsLoading(false);
     }

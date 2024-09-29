@@ -5,23 +5,35 @@ import { supabase } from '@/lib/supabase';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 export default function GroupsList() {
   const [groups, setGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch groups from supabase
   useEffect(() => {
-    const fetchGroups = async () => {
-      const { data, error } = await supabase
-        .from('groups') // Fetch from the "groups" table
-        .select('*');
+    const fetchError = localStorage.getItem('fetchError');
+    if (fetchError) {
+      setError(fetchError);
+      localStorage.removeItem('fetchError');
+    }
 
-      if (error) {
+    const fetchGroups = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('groups')
+          .select('*');
+        
+        if (error) throw error;
+        setGroups(data);
+      } catch (error) {
         console.error('Error fetching groups:', error);
-      } else {
-        setGroups(data); // Set the fetched data into state
+        setError('Failed to load groups. Please try again.');
+      } finally {
+        setIsLoading(false);
       }
     };
 
@@ -41,8 +53,18 @@ export default function GroupsList() {
     );
   };
 
+  if (isLoading) {
+    return <div>Loading...</div>
+  }
+
   return (
     <div className="container mx-auto py-10">
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <h2 className="text-2xl font-bold mb-4">Groups List</h2>
       <Checkbox
         id="select-all"
