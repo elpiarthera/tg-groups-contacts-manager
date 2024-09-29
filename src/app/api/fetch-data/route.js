@@ -1,6 +1,4 @@
-import { TelegramClient } from 'telethon';
-import { StringSession } from 'telethon/sessions';
-import { Api } from 'telethon/tl';
+import { NextResponse } from 'next/server';
 
 export async function POST(req) {
   console.log("Received fetch-data request");

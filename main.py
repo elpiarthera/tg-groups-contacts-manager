@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from telethon.sync import TelegramClient
 from telethon.errors import FloodWaitError
 from telethon.tl.functions.messages import ExportChatInviteRequest
+from telethon.tl.functions.messages import GetDialogsRequest
+from telethon.tl.types import InputPeerEmpty
 import os
 import csv
 from io import StringIO
@@ -35,25 +37,34 @@ class ExtractionRequest(BaseModel):
 
 @app.post("/api/fetch-data")
 async def fetch_data(credentials: TelegramCredentials):
-    client = TelegramClient('session_name', credentials.api_id, credentials.api_hash)
+    client = TelegramClient('session', credentials.api_id, credentials.api_hash)
     await client.start(phone=credentials.phone_number)
 
     try:
-        dialogs = await client.get_dialogs()
-        groups = [dialog for dialog in dialogs if dialog.is_group or dialog.is_channel]
-        
-        result = []
-        for group in groups:
-            result.append({
-                "id": group.id,
-                "name": group.name,
-                "memberCount": group.entity.participants_count if hasattr(group.entity, 'participants_count') else 'Unknown'
-            })
-        
-        # Store the fetched data in Supabase
-        supabase.table("groups").upsert(result).execute()
-        
-        return result
+        if credentials.extract_type == 'groups':
+            chats = []
+            try:
+                result = await client(GetDialogsRequest(
+                    offset_date=None,
+                    offset_id=0,
+                    offset_peer=InputPeerEmpty(),
+                    limit=None,
+                    hash=0
+                ))
+                chats.extend(chat for chat in result.chats if hasattr(chat, 'megagroup') and chat.megagroup)
+            except FloodWaitError as e:
+                await client.disconnect()
+                raise HTTPException(status_code=429, detail=f"Rate limit exceeded. Please wait for {e.seconds} seconds before trying again.")
+            return {"data": [{"id": chat.id, "title": chat.title, "members_count": chat.participants_count} for chat in chats]}
+        elif credentials.extract_type == 'contacts':
+            try:
+                contacts = await client.get_contacts()
+            except FloodWaitError as e:
+                await client.disconnect()
+                raise HTTPException(status_code=429, detail=f"Rate limit exceeded. Please wait for {e.seconds} seconds before trying again.")
+            return {"data": [{"id": contact.id, "first_name": contact.first_name, "last_name": contact.last_name, "phone": contact.phone} for contact in contacts]}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid extract type")
     finally:
         await client.disconnect()
 
