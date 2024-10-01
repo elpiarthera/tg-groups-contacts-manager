@@ -1,35 +1,35 @@
-// src/components/TelegramManager.jsx
-'use client';
+'use client'
 
-import { useState } from 'react';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { InfoIcon, Loader2 } from 'lucide-react';
+import { useState } from 'react'
+import { Loader2, InfoIcon } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-export default function TelegramManager() {
-  const [apiId, setApiId] = useState('');
-  const [apiHash, setApiHash] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [extractType, setExtractType] = useState('groups');
-  const [groups, setGroups] = useState([]);
-  const [selectedGroups, setSelectedGroups] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [phoneCode, setPhoneCode] = useState('');
-  const [showPhoneCodeInput, setShowPhoneCodeInput] = useState(false);
-  const [extractedData, setExtractedData] = useState(null);
-  const [csvUrl, setCsvUrl] = useState(null);
+export default function TelegramExtractor() {
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [validationCode, setValidationCode] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [items, setItems] = useState([])
+  const [selectedItems, setSelectedItems] = useState([])
+  const [showResults, setShowResults] = useState(false)
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [csvUrl, setCsvUrl] = useState(null)
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setIsLoading(true);
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
 
     try {
       const response = await fetch('/api/extract-data', {
@@ -41,62 +41,74 @@ export default function TelegramManager() {
       const data = await response.json();
 
       if (response.ok) {
-        setCsvUrl(data.csvUrl);
-        // Handle successful extraction (e.g., show success message, update UI)
+        setShowValidationInput(true)
       } else {
-        throw new Error(data.error || 'Failed to extract data');
+        throw new Error(data.error || 'Failed to initiate extraction')
       }
     } catch (error) {
-      console.error('Error:', error);
-      setError(error.message);
+      console.error('Error:', error)
+      setError(error.message)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
-  const handlePhoneCodeSubmit = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError(null);
+  const handleValidationSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
+
     try {
       const response = await fetch('/api/fetch-data', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, phoneCode }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode }),
       });
+
       const data = await response.json();
-      if (response.status === 200) {
-        setGroups(data);
-        setShowPhoneCodeInput(false);
+
+      if (response.ok) {
+        setItems(data)
+        setShowResults(true)
+        setShowValidationInput(false)
       } else {
-        throw new Error(data.error || 'Failed to authenticate');
+        throw new Error(data.error || 'Failed to validate code or fetch data')
       }
     } catch (error) {
-      console.error('Error authenticating:', error);
-      setError(error.message || 'An error occurred during authentication');
+      console.error('Error:', error)
+      setError(error.message)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
+
+  const handleSelectItem = (itemId) => {
+    setSelectedItems(prev => 
+      prev.includes(itemId)
+        ? prev.filter(id => id !== itemId)
+        : [...prev, itemId]
+    )
+  }
+
+  const handleSelectAll = () => {
+    setSelectedItems(selectedItems.length === items.length ? [] : items.map(item => item.id))
+  }
 
   const handleExtract = async () => {
-    setIsLoading(true);
-    setError(null);
+    setIsLoading(true)
+    setError(null)
     try {
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedGroups }),
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems }),
       });
       if (!response.ok) {
         throw new Error('Failed to extract data');
       }
       const data = await response.json();
-      setExtractedData(data.extractedData);
       setCsvUrl(data.csvUrl);
     } catch (error) {
       console.error('Error extracting data:', error);
@@ -104,13 +116,13 @@ export default function TelegramManager() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
+    <Card className="w-full max-w-4xl mx-auto">
       <CardHeader>
-        <CardTitle>Telegram Groups and Contacts Manager</CardTitle>
-        <CardDescription>Manage your Telegram groups and contacts ethically</CardDescription>
+        <CardTitle>Telegram Extractor</CardTitle>
+        <CardDescription>Telegram Groups and Contacts Manager</CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="extract" className="w-full">
@@ -130,119 +142,143 @@ export default function TelegramManager() {
                   <li>Click on 'Create application'.</li>
                   <li>You'll see your API ID and API Hash on the next page. Use these in the form below.</li>
                 </ol>
-                <p className="mt-2"><strong>Note:</strong> Keep your API ID and API Hash private and never share them publicly.</p>
               </AlertDescription>
             </Alert>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="api-id">API ID</Label>
-                <Input
-                  id="api-id"
-                  value={apiId}
-                  onChange={(e) => setApiId(e.target.value)}
-                  required
-                  placeholder="Enter your API ID"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="api-hash">API Hash</Label>
-                <Input
-                  id="api-hash"
-                  value={apiHash}
-                  onChange={(e) => setApiHash(e.target.value)}
-                  required
-                  placeholder="Enter your API Hash"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
-                <Input
-                  id="phone-number"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  required
-                  placeholder="Enter your phone number (with country code)"
-                />
-              </div>
-              <RadioGroup value={extractType} onValueChange={setExtractType} className="flex space-x-4">
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="groups" id="groups" />
-                  <Label htmlFor="groups">Extract Groups</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="contacts" id="contacts" />
-                  <Label htmlFor="contacts">Extract Contacts</Label>
-                </div>
-              </RadioGroup>
-              <Button type="submit" disabled={isLoading} className="w-full">
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                {isLoading ? 'Fetching...' : 'Fetch Data'}
-              </Button>
-            </form>
-            
-            {showPhoneCodeInput && (
-              <form onSubmit={handlePhoneCodeSubmit} className="mt-4 space-y-4">
+            {!showValidationInput ? (
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="phone-code">Phone Code</Label>
+                  <Label htmlFor="api-id">API ID</Label>
                   <Input
-                    id="phone-code"
-                    value={phoneCode}
-                    onChange={(e) => setPhoneCode(e.target.value)}
+                    id="api-id"
+                    value={apiId}
+                    onChange={(e) => setApiId(e.target.value)}
                     required
-                    placeholder="Enter the code you received"
+                    disabled={isLoading}
+                    placeholder="Enter your API ID"
                   />
                 </div>
-                <Button type="submit" disabled={isLoading} className="w-full">
+                <div className="space-y-2">
+                  <Label htmlFor="api-hash">API Hash</Label>
+                  <Input
+                    id="api-hash"
+                    value={apiHash}
+                    onChange={(e) => setApiHash(e.target.value)}
+                    required
+                    disabled={isLoading}
+                    placeholder="Enter your API Hash"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
+                  <Input
+                    id="phone-number"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    required
+                    disabled={isLoading}
+                    placeholder="Enter your phone number (with country code)"
+                  />
+                </div>
+                <RadioGroup value={extractType} onValueChange={setExtractType}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+                    <Label htmlFor="groups">Extract Groups</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+                    <Label htmlFor="contacts">Extract Contacts</Label>
+                  </div>
+                </RadioGroup>
+                <Button type="submit" disabled={isLoading}>
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isLoading ? 'Verifying...' : 'Verify Code'}
+                  {isLoading ? 'Requesting Code...' : 'Fetch Data'}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={handleValidationSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="validation-code">Validation Code</Label>
+                  <Input
+                    id="validation-code"
+                    value={validationCode}
+                    onChange={(e) => setValidationCode(e.target.value)}
+                    required
+                    disabled={isLoading}
+                    placeholder="Enter the code sent to your Telegram app"
+                  />
+                </div>
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  {isLoading ? 'Validating...' : 'Validate and Fetch Data'}
                 </Button>
               </form>
             )}
-
             {error && (
               <Alert variant="destructive" className="mt-4">
                 <AlertTitle>Error</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-
-            {groups.length > 0 && (
-              <div className="mt-6 space-y-4">
-                <h3 className="text-lg font-semibold">Select Groups to Extract</h3>
-                {groups.map((group) => (
-                  <div key={group.id} className="flex items-center space-x-2">
+            {showResults && (
+              <div className="mt-8">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-2xl font-bold">{extractType === 'groups' ? 'Groups' : 'Contacts'} List</h2>
+                  <div className="flex items-center space-x-2">
                     <Checkbox
-                      id={`group-${group.id}`}
-                      checked={selectedGroups.includes(group.id)}
-                      onCheckedChange={(checked) => {
-                        setSelectedGroups(
-                          checked
-                            ? [...selectedGroups, group.id]
-                            : selectedGroups.filter((id) => id !== group.id)
-                        );
-                      }}
+                      id="select-all"
+                      checked={selectedItems.length === items.length}
+                      onCheckedChange={handleSelectAll}
                     />
-                    <Label htmlFor={`group-${group.id}`}>
-                      {group.name} ({group.memberCount} members)
-                    </Label>
+                    <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                      {selectedItems.length === items.length ? "Unselect All" : "Select All"}
+                    </label>
                   </div>
-                ))}
-                <Button onClick={handleExtract} disabled={isLoading || selectedGroups.length === 0} className="w-full">
+                </div>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[50px]">Select</TableHead>
+                        <TableHead>Name</TableHead>
+                        {extractType === 'groups' ? (
+                          <TableHead>Members</TableHead>
+                        ) : (
+                          <>
+                            <TableHead>Username</TableHead>
+                            <TableHead>Phone Number</TableHead>
+                          </>
+                        )}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedItems.includes(item.id)}
+                              onCheckedChange={() => handleSelectItem(item.id)}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">{item.name}</TableCell>
+                          {extractType === 'groups' ? (
+                            <TableCell>{item.memberCount}</TableCell>
+                          ) : (
+                            <>
+                              <TableCell>@{item.username}</TableCell>
+                              <TableCell>{item.phoneNumber}</TableCell>
+                            </>
+                          )}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <Button onClick={handleExtract} disabled={isLoading || selectedItems.length === 0} className="mt-4">
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isLoading ? 'Extracting...' : 'Extract Selected Groups'}
+                  {isLoading ? 'Extracting...' : `Extract Selected ${extractType}`}
                 </Button>
               </div>
             )}
-
-            {extractedData && (
-              <div className="mt-6">
-                <h3 className="text-lg font-semibold">Extracted Data</h3>
-                <pre className="mt-2 p-4 bg-gray-100 rounded overflow-auto">
-                  {JSON.stringify(extractedData, null, 2)}
-                </pre>
-              </div>
-            )}
-
             {csvUrl && (
               <Button asChild className="mt-4 w-full">
                 <a href={csvUrl} download>Download CSV</a>
@@ -250,10 +286,10 @@ export default function TelegramManager() {
             )}
           </TabsContent>
           <TabsContent value="account">
-            <p>Account settings will be available here.</p>
+            <p>Account settings will be implemented in a future update.</p>
           </TabsContent>
         </Tabs>
       </CardContent>
     </Card>
-  );
+  )
 }
