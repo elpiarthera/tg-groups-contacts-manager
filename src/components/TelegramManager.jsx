@@ -143,11 +143,6 @@ export default function TelegramExtractor() {
                 <ol className="list-decimal list-inside space-y-2">
                   <li>
                     Go to{' '}
-                    
-                      href="https://my.telegram.org"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline"
                     <a
                       href="https://my.telegram.org"
                       target="_blank"
@@ -155,10 +150,10 @@ export default function TelegramExtractor() {
                       className="text-blue-500 hover:underline"
                     >
                       https://my.telegram.org
-                    </a>{' '}
-                    and log in with your Telegram account.
+                    </a>
+                    {' '}and log in with your Telegram account.
                   </li>
-                  <li>Click on 'API development tools'.</li>
+                  <li>Click on &apos;API development tools&apos;.</li>
                   <li>Fill in the form with your app details.</li>
                   <li>Click on &apos;Create application&apos;.</li>
                   <li>You&apos;ll see your API ID and API Hash on the next page. Use these in the form below.</li>
