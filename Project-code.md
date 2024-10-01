@@ -41,12 +41,14 @@ Directory Structure:
     │       └── utils.js
     ├── utils
     │   └── config.js
+    ├── .env
     ├── .gitignore
     ├── .vercelignore
     ├── components.json
     ├── jsconfig.json
     ├── next.config.js
     ├── package.json
+    ├── postcss.config.js
     ├── tailwind.config.js
     └── vercel.json
 
@@ -313,10 +315,15 @@ File: /src/app/layout.js
 
 import './global.css'
 
+export const metadata = {
+  title: 'Telegram Groups and Contacts Extractor',
+  description: 'Extract Telegram Groups and Contacts easily',
+}
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="min-h-screen bg-gray-100">{children}</body>
     </html>
   )
 }
@@ -1561,6 +1568,16 @@ export { API_BASE_URL };
 
 
 ---
+File: /.env
+---
+
+NEXT_PUBLIC_SUPABASE_URL=https://oisymxsvkchphdvxucdt.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pc3lteHN2a2NocGhkdnh1Y2R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mjc1MDcyMDYsImV4cCI6MjA0MzA4MzIwNn0.JsGtX4Kaq5g1ySxtT-oBYJNvNZ3LWEX5FOB5cN8wcAs
+NEXT_PUBLIC_API_BASE_URL=/api
+
+
+
+---
 File: /.gitignore
 ---
 
@@ -1738,8 +1755,8 @@ File: /package.json
 {
   "name": "tg-groups-and-contacts-extractor",
   "version": "1.0.0",
-  "description": "First version fo Telegram Groups and Contacts extractor",
-  "main": "index.js",
+  "description": "First version of Telegram Groups and Contacts extractor",
+  "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -1748,6 +1765,9 @@ File: /package.json
   },
   "author": "ElPi",
   "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
@@ -1778,16 +1798,28 @@ File: /package.json
 
 
 ---
+File: /postcss.config.js
+---
+
+module.exports = {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+
+
+---
 File: /tailwind.config.js
 ---
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    "./src/**/*.{js,ts,jsx,tsx}",
-    "./app/**/*.{js,ts,jsx,tsx}",
-    "./pages/**/*.{js,ts,jsx,tsx}",
-    "./components/**/*.{js,ts,jsx,tsx}",
+    "./src/pages/**/*.{js,jsx}",
+    "./src/components/**/*.{js,jsx}",
+    "./src/app/**/*.{js,jsx}",
   ],
   theme: {
     extend: {},
@@ -1816,5 +1848,3 @@ File: /vercel.json
     }
   ]
 }
-
-
