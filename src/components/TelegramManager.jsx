@@ -1,3 +1,4 @@
+// src/components/TelegramManager.jsx
 'use client';
 
 import { useState } from 'react';
@@ -10,9 +11,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InfoIcon, Loader2 } from 'lucide-react';
-
-// Remove this line if you don't have a config file
-// import { API_BASE_URL } from '@/utils/config';
 
 export default function TelegramManager() {
   const [apiId, setApiId] = useState('');
@@ -87,7 +85,6 @@ export default function TelegramManager() {
     setIsLoading(true);
     setError(null);
     try {
-      // Replace API_BASE_URL with the actual URL or use a relative path
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: {
