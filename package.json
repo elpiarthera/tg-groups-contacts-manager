@@ -1,8 +1,8 @@
 {
   "name": "tg-groups-and-contacts-extractor",
   "version": "1.0.0",
-  "description": "First version fo Telegram Groups and Contacts extractor",
-  "main": "index.js",
+  "description": "First version of Telegram Groups and Contacts extractor",
+  "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -11,6 +11,9 @@
   },
   "author": "ElPi",
   "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
