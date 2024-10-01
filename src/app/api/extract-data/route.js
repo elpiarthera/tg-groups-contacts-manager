@@ -4,7 +4,7 @@ import { handleTelegramError } from '@/lib/apiUtils';
 
 export async function POST(req) {
   try {
-    const { apiId, apiHash, phoneNumber, extractType } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json(); // Added validationCode
 
     // Lazy-load the Telegram client and StringSession only when needed
     const { TelegramClient } = await import('telegram');
@@ -20,7 +20,7 @@ export async function POST(req) {
     await client.start({
       phoneNumber: async () => phoneNumber,
       password: async () => '',
-      phoneCode: async () => '', // handle verification codes if needed
+      phoneCode: async () => validationCode, // Use the received validation code
       onError: (err) => console.log(err),
     });
 
