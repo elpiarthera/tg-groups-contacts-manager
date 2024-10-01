@@ -1,25 +1,26 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { supabase } from '@/lib/supabase'
+import { useState, useEffect } from 'react';
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { supabase } from '@/lib/supabase';
+import { generateCSV } from '@/lib/csvUtils';
 
 export default function GroupsList() {
-  const [groups, setGroups] = useState([])
-  const [selectedGroups, setSelectedGroups] = useState([])
-  const [selectAll, setSelectAll] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [groups, setGroups] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState([]);
+  const [selectAll, setSelectAll] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     const fetchGroups = async () => {
       try {
         const { data, error } = await supabase
           .from('groups')
-          .select('*');
-        
+          .select('*'); // Ensure filtering by user_id if necessary
+
         if (error) throw error;
         setGroups(data);
       } catch (error) {
@@ -31,41 +32,30 @@ export default function GroupsList() {
     };
 
     fetchGroups();
-  }, [])
+  }, []);
 
   const handleSelectAll = () => {
-    setSelectAll(!selectAll)
-    setSelectedGroups(selectAll ? [] : groups.map(group => group.id))
-  }
+    setSelectAll(!selectAll);
+    setSelectedGroups(selectAll ? [] : groups.map(group => group.id));
+  };
 
   const handleSelectGroup = (groupId) => {
     setSelectedGroups(prevSelected =>
       prevSelected.includes(groupId)
         ? prevSelected.filter(id => id !== groupId)
         : [...prevSelected, groupId]
-    )
-  }
+    );
+  };
 
   const handleExtract = async () => {
     try {
       const selectedData = groups.filter(group => selectedGroups.includes(group.id));
-      const csvContent = generateCSV(selectedData);
+      const csvContent = generateCSV(selectedData, ['id', 'group_name', 'description', 'invite_link']);
       downloadCSV(csvContent, 'extracted_groups.csv');
     } catch (error) {
       console.error('Error extracting groups:', error);
       setError('Failed to extract groups. Please try again.');
     }
-  };
-
-  const generateCSV = (data) => {
-    const headers = ['ID', 'Group Name', 'Description', 'Invite Link'];
-    const rows = data.map(group => [
-      group.id,
-      group.group_name,
-      group.description,
-      group.invite_link
-    ]);
-    return [headers, ...rows].map(row => row.join(',')).join('\n');
   };
 
   const downloadCSV = (content, fileName) => {
@@ -83,11 +73,11 @@ export default function GroupsList() {
   };
 
   if (isLoading) {
-    return <div>Loading...</div>
+    return <div>Loading...</div>;
   }
 
   if (error) {
-    return <div>Error: {error}</div>
+    return <div>Error: {error}</div>;
   }
 
   return (
@@ -130,5 +120,5 @@ export default function GroupsList() {
       </Table>
       <Button onClick={handleExtract} disabled={selectedGroups.length === 0}>Extract Selected Groups</Button>
     </div>
-  )
+  );
 }

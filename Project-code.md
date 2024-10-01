@@ -303,12 +303,13 @@ import TelegramManager from '../components/TelegramManager';
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-24">
-      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+    <main className="flex min-h-screen flex-col items-center justify-center p-4 sm:p-8 md:p-24">
+      <h1 className="text-3xl sm:text-4xl font-bold mb-8">Telegram Extractor</h1>
       <TelegramManager />
     </main>
   )
 }
+
 
 
 ---
@@ -1056,7 +1057,7 @@ File: /src/components/TelegramManager.jsx
 'use client'
 
 import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -1476,7 +1477,8 @@ venv/
 .next/
 !lib/
 !lib/**/*
-
+.env
+project-code.node_modules
 
 
 ---

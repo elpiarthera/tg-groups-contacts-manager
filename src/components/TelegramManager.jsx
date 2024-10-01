@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Button } from "@/components/ui/button"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { InfoIcon, Loader2 } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { InfoIcon, Loader2, CheckCircleIcon } from 'lucide-react';
 
 export default function TelegramManager() {
   const [apiId, setApiId] = useState('');
@@ -16,13 +16,16 @@ export default function TelegramManager() {
   const [extractType, setExtractType] = useState('groups');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null); // To display success messages
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
+    setSuccessMessage(null);
     setIsLoading(true);
 
     try {
+      // Make an API request to extract data
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -30,19 +33,17 @@ export default function TelegramManager() {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! Status: ${response.status}`);
       }
 
-      const text = await response.text();
-      console.log('Raw response:', text);
+      const data = await response.json();
 
-      if (!text) {
-        throw new Error('Empty response from server');
+      if (data.success) {
+        // Show success message with the number of groups/contacts extracted
+        setSuccessMessage(`${data.count} ${extractType === 'groups' ? 'groups' : 'contacts'} extracted successfully.`);
+      } else {
+        throw new Error(data.error || 'Unknown error');
       }
-
-      const data = JSON.parse(text);
-      console.log('Data extracted successfully:', data);
-      // TODO: Handle successful extraction (e.g., show success message, update UI)
     } catch (error) {
       console.error('Error:', error);
       setError(error.message);
@@ -55,7 +56,7 @@ export default function TelegramManager() {
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>Telegram Groups and Contacts Manager</CardTitle>
-        <CardDescription>Manage your Telegram groups and contacts ethically</CardDescription>
+        <CardDescription>Manage your Telegram groups and contacts efficiently</CardDescription>
       </CardHeader>
       <CardContent>
         <Alert className="mb-6">
@@ -119,12 +120,18 @@ export default function TelegramManager() {
             </div>
           </RadioGroup>
           {error && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" className="mt-4">
               <AlertTitle>Error</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          <Button type="submit" disabled={isLoading}>
+          {successMessage && (
+            <Alert variant="success" className="mt-4">
+              <CheckCircleIcon className="h-4 w-4" />
+              <AlertDescription>{successMessage}</AlertDescription>
+            </Alert>
+          )}
+          <Button type="submit" disabled={isLoading} className="w-full">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isLoading ? 'Fetching...' : 'Fetch Data'}
           </Button>
