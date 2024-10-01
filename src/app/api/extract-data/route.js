@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
 import { supabase } from '@/lib/supabase';
 import { handleTelegramError } from '@/lib/apiUtils';
 
 export async function POST(req) {
   try {
     const { apiId, apiHash, phoneNumber, extractType } = await req.json();
+
+    // Lazy-load the Telegram client and StringSession only when needed
+    const { TelegramClient } = await import('telegram');
+    const { StringSession } = await import('telegram/sessions');
 
     // Initialize the Telegram client
     const stringSession = new StringSession(''); 
@@ -23,6 +25,7 @@ export async function POST(req) {
     });
 
     let extractedData = [];
+    
     if (extractType === 'groups') {
       // Fetch groups
       const dialogs = await client.getDialogs();
@@ -83,3 +86,4 @@ export async function POST(req) {
     }, { status: 500 });
   }
 }
+

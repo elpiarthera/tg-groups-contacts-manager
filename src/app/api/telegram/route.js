@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
 import { supabase } from '@/lib/supabase';
 
 export async function POST(req) {
   const { apiId, apiHash, phoneNumber } = await req.json();
+
+  // Lazy-load the Telegram client and StringSession only when needed
+  const { TelegramClient } = await import('telegram');
+  const { StringSession } = await import('telegram/sessions');
 
   const stringSession = new StringSession('');
   const client = new TelegramClient(stringSession, apiId, apiHash, {
@@ -19,6 +21,7 @@ export async function POST(req) {
       onError: (err) => console.log(err),
     });
 
+    // Fetch groups from the Telegram API
     const groups = await client.getDialogs();
     const groupsData = groups.map(group => ({
       id: group.id,
@@ -27,6 +30,7 @@ export async function POST(req) {
       invite_link: group.inviteLink || '',
     }));
 
+    // Upsert groups data into Supabase
     const { data, error } = await supabase
       .from('groups')
       .upsert(groupsData, { onConflict: 'id' });

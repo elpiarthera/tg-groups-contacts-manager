@@ -23,7 +23,7 @@ build/
 # Ignore IDE or editor configurations
 .vscode/
 .idea/
-.editorconfig
+.editorconfig  # Only exclude if you don't need it in the repo
 
 # Ignore macOS system files
 .DS_Store
@@ -47,10 +47,9 @@ jest.config.js
 Project-code.md
 .cursorrules
 
-# Ignore package lock files
-package-lock.json
-yarn.lock
-
+# Optional: Lock files should generally be included for consistent dependency versions
+# package-lock.json
+# yarn.lock
 
 # Exclude specific unnecessary folders/files (modify if not needed)
 .project-code/
