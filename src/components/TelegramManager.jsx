@@ -26,7 +26,7 @@ export default function TelegramExtractor() {
   const [showValidationInput, setShowValidationInput] = useState(false);
   const [csvUrl, setCsvUrl] = useState(null);
 
-  // Handle initial submission
+  // Handle initial submission (request Telegram code)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -39,13 +39,12 @@ export default function TelegramExtractor() {
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setShowValidationInput(true);
-      } else {
-        throw new Error(data.error || 'Failed to initiate extraction');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to initiate extraction');
       }
+
+      setShowValidationInput(true);  // Show validation input for the code
     } catch (error) {
       console.error('Error:', error);
       setError(error.message);
@@ -69,13 +68,13 @@ export default function TelegramExtractor() {
 
       const data = await response.json();
 
-      if (response.ok) {
-        setItems(data);
-        setShowResults(true);
-        setShowValidationInput(false);
-      } else {
+      if (!response.ok) {
         throw new Error(data.error || 'Failed to validate code or fetch data');
       }
+
+      setItems(data);
+      setShowResults(true);
+      setShowValidationInput(false);
     } catch (error) {
       console.error('Error:', error);
       setError(error.message);
@@ -97,15 +96,18 @@ export default function TelegramExtractor() {
   const handleExtract = async () => {
     setIsLoading(true);
     setError(null);
+
     try {
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems }),
       });
+
       if (!response.ok) {
         throw new Error('Failed to extract data');
       }
+
       const data = await response.json();
       setCsvUrl(data.csvUrl);
     } catch (error) {
@@ -153,6 +155,7 @@ export default function TelegramExtractor() {
                 </ol>
               </AlertDescription>
             </Alert>
+
             {!showValidationInput ? (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
@@ -199,8 +202,7 @@ export default function TelegramExtractor() {
                   </div>
                 </RadioGroup>
                 <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isLoading ? 'Requesting Code...' : 'Fetch Data'}
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Fetch Data'}
                 </Button>
               </form>
             ) : (
@@ -217,17 +219,18 @@ export default function TelegramExtractor() {
                   />
                 </div>
                 <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isLoading ? 'Validating...' : 'Validate and Fetch Data'}
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Validate and Fetch Data'}
                 </Button>
               </form>
             )}
+
             {error && (
               <Alert variant="destructive" className="mt-4">
                 <AlertTitle>Error</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
+
             {showResults && (
               <div className="mt-8">
                 <div className="flex justify-between items-center mb-4">
@@ -286,11 +289,11 @@ export default function TelegramExtractor() {
                   </Table>
                 </div>
                 <Button onClick={handleExtract} disabled={isLoading || selectedItems.length === 0} className="mt-4">
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isLoading ? 'Extracting...' : `Extract Selected ${extractType}`}
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : `Extract Selected ${extractType}`}
                 </Button>
               </div>
             )}
+
             {csvUrl && (
               <Button asChild className="mt-4 w-full">
                 <a href={csvUrl} download>

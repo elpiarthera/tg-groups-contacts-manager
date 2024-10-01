@@ -64,7 +64,7 @@ import { handleTelegramError } from '@/lib/apiUtils';
 
 export async function POST(req) {
   try {
-    const { apiId, apiHash, phoneNumber, extractType } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json(); // Added validationCode
 
     // Lazy-load the Telegram client and StringSession only when needed
     const { TelegramClient } = await import('telegram');
@@ -80,7 +80,7 @@ export async function POST(req) {
     await client.start({
       phoneNumber: async () => phoneNumber,
       password: async () => '',
-      phoneCode: async () => '', // handle verification codes if needed
+      phoneCode: async () => validationCode, // Use the received validation code
       onError: (err) => console.log(err),
     });
 
@@ -1159,38 +1159,39 @@ export default function GroupsList() {
 File: /src/components/TelegramManager.jsx
 ---
 
-'use client'
+'use client';
 
-import { useState } from 'react'
-import { Loader2, InfoIcon } from 'lucide-react'
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useState } from 'react';
+import { Loader2, InfoIcon } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function TelegramExtractor() {
-  const [apiId, setApiId] = useState('')
-  const [apiHash, setApiHash] = useState('')
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [validationCode, setValidationCode] = useState('')
-  const [extractType, setExtractType] = useState('groups')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [items, setItems] = useState([])
-  const [selectedItems, setSelectedItems] = useState([])
-  const [showResults, setShowResults] = useState(false)
-  const [showValidationInput, setShowValidationInput] = useState(false)
-  const [csvUrl, setCsvUrl] = useState(null)
+  const [apiId, setApiId] = useState('');
+  const [apiHash, setApiHash] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [validationCode, setValidationCode] = useState('');
+  const [extractType, setExtractType] = useState('groups');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [items, setItems] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [showResults, setShowResults] = useState(false);
+  const [showValidationInput, setShowValidationInput] = useState(false);
+  const [csvUrl, setCsvUrl] = useState(null);
 
+  // Handle initial submission
   const handleSubmit = async (e) => {
-    e.preventDefault()
-    setError(null)
-    setIsLoading(true)
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
 
     try {
       const response = await fetch('/api/extract-data', {
@@ -1202,68 +1203,65 @@ export default function TelegramExtractor() {
       const data = await response.json();
 
       if (response.ok) {
-        setShowValidationInput(true)
+        setShowValidationInput(true);
       } else {
-        throw new Error(data.error || 'Failed to initiate extraction')
+        throw new Error(data.error || 'Failed to initiate extraction');
       }
     } catch (error) {
-      console.error('Error:', error)
-      setError(error.message)
+      console.error('Error:', error);
+      setError(error.message);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
+  // Handle validation code submission
   const handleValidationSubmit = async (e) => {
-    e.preventDefault()
-    setError(null)
-    setIsLoading(true)
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
 
     try {
-      const response = await fetch('/api/fetch-data', {
+      const response = await fetch('/api/extract-data', {  // Update to use extract-data for validation
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode }),
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode, extractType }), // Pass validationCode
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        setItems(data)
-        setShowResults(true)
-        setShowValidationInput(false)
+        setItems(data);
+        setShowResults(true);
+        setShowValidationInput(false);
       } else {
-        throw new Error(data.error || 'Failed to validate code or fetch data')
+        throw new Error(data.error || 'Failed to validate code or fetch data');
       }
     } catch (error) {
-      console.error('Error:', error)
-      setError(error.message)
+      console.error('Error:', error);
+      setError(error.message);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleSelectItem = (itemId) => {
-    setSelectedItems(prev => 
-      prev.includes(itemId)
-        ? prev.filter(id => id !== itemId)
-        : [...prev, itemId]
-    )
-  }
+    setSelectedItems((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
+    );
+  };
 
   const handleSelectAll = () => {
-    setSelectedItems(selectedItems.length === items.length ? [] : items.map(item => item.id))
-  }
+    setSelectedItems(selectedItems.length === items.length ? [] : items.map((item) => item.id));
+  };
 
   const handleExtract = async () => {
-    setIsLoading(true)
-    setError(null)
+    setIsLoading(true);
+    setError(null);
     try {
       const response = await fetch('/api/extract-data', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems }),
       });
       if (!response.ok) {
@@ -1277,7 +1275,7 @@ export default function TelegramExtractor() {
     } finally {
       setIsLoading(false);
     }
-  }
+  };
 
   return (
     <Card className="w-full max-w-4xl mx-auto">
@@ -1297,7 +1295,18 @@ export default function TelegramExtractor() {
               <AlertTitle>How to get API ID and API Hash</AlertTitle>
               <AlertDescription>
                 <ol className="list-decimal list-inside space-y-2">
-                  <li>Go to <a href="https://my.telegram.org" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">https://my.telegram.org</a> and log in with your Telegram account.</li>
+                  <li>
+                    Go to{' '}
+                    <a
+                      href="https://my.telegram.org"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
+                    >
+                      https://my.telegram.org
+                    </a>{' '}
+                    and log in with your Telegram account.
+                  </li>
                   <li>Click on 'API development tools'.</li>
                   <li>Fill in the form with your app details.</li>
                   <li>Click on 'Create application'.</li>
@@ -1390,8 +1399,11 @@ export default function TelegramExtractor() {
                       checked={selectedItems.length === items.length}
                       onCheckedChange={handleSelectAll}
                     />
-                    <label htmlFor="select-all" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                      {selectedItems.length === items.length ? "Unselect All" : "Select All"}
+                    <label
+                      htmlFor="select-all"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {selectedItems.length === items.length ? 'Unselect All' : 'Select All'}
                     </label>
                   </div>
                 </div>
@@ -1442,7 +1454,9 @@ export default function TelegramExtractor() {
             )}
             {csvUrl && (
               <Button asChild className="mt-4 w-full">
-                <a href={csvUrl} download>Download CSV</a>
+                <a href={csvUrl} download>
+                  Download CSV
+                </a>
               </Button>
             )}
           </TabsContent>
@@ -1452,7 +1466,7 @@ export default function TelegramExtractor() {
         </Tabs>
       </CardContent>
     </Card>
-  )
+  );
 }
 
 

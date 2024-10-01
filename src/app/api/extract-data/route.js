@@ -79,7 +79,8 @@ export async function POST(req) {
 
   } catch (error) {
     console.error('Error in extract-data API:', error);
-    await handleTelegramError(error); // Handle rate limit error
+
+    // Properly handle the error and return JSON response
     return NextResponse.json({
       success: false,
       error: error.message || 'An unknown error occurred'
