@@ -5,3 +5,5 @@ venv/
 .next/
 !lib/
 !lib/**/*
+.env
+project-code.node_modules

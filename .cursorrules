@@ -36,3 +36,30 @@ Version Control and Deployment:
 - We only have the main branch
 - Use 'git push origin main' when pushing changes
 - Use 'vercel --prod' for deploying to Vercel
+
+Progress Made Today:
+- Fixed TelegramManager component to handle form submission correctly
+- Addressed Supabase environment variable warnings by updating the supabase.js file
+- Reviewed and fixed import issues, ensuring consistent use of '@' alias
+- Simplified the implementation to get basic form submission working
+- Added error handling and loading states to the TelegramManager component
+
+Challenges Faced:
+- Encountered issues with Vercel deployment due to serverless function size limit
+- ReferenceError: apiId is not defined (in TelegramManager component) - Resolved
+- Import path inconsistencies - Resolved
+
+Still Needs to be Done:
+1. Resolve the Vercel deployment issue: "Error: A Serverless Function has exceeded the unzipped maximum size of 250 MB. : https://vercel.link/serverless-function-size"
+2. Implement redirection to Groups List or Contacts List page after successful data fetching
+3. Develop the Groups List and Contacts List components
+4. Implement CSV download functionality for selected records
+5. Add more robust error handling and user feedback
+6. Optimize the application for better performance
+7. Conduct thorough testing of all features and edge cases
+
+Next Steps:
+1. Investigate and resolve the Vercel deployment size issue
+2. Implement the redirection logic after successful form submission
+3. Create the Groups List and Contacts List components
+4. Add CSV generation and download functionality
