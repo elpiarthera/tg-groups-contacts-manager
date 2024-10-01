@@ -26,7 +26,6 @@ export default function TelegramExtractor() {
   const [showValidationInput, setShowValidationInput] = useState(false);
   const [csvUrl, setCsvUrl] = useState(null);
 
-  // Handle initial submission (request Telegram code)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
@@ -39,12 +38,18 @@ export default function TelegramExtractor() {
         body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to initiate extraction');
+        throw new Error(data.error || 'Failed to initiate extraction');
       }
 
-      setShowValidationInput(true);  // Show validation input for the code
+      if (data.requiresValidation) {
+        setShowValidationInput(true);
+      } else {
+        setItems(data.items || []);
+        setShowResults(true);
+      }
     } catch (error) {
       console.error('Error:', error);
       setError(error.message);
@@ -53,17 +58,16 @@ export default function TelegramExtractor() {
     }
   };
 
-  // Handle validation code submission
   const handleValidationSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/extract-data', {  // Update to use extract-data for validation
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode, extractType }), // Pass validationCode
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode, extractType }),
       });
 
       const data = await response.json();
@@ -72,7 +76,7 @@ export default function TelegramExtractor() {
         throw new Error(data.error || 'Failed to validate code or fetch data');
       }
 
-      setItems(data);
+      setItems(data.items || []);
       setShowResults(true);
       setShowValidationInput(false);
     } catch (error) {
@@ -101,14 +105,15 @@ export default function TelegramExtractor() {
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems }),
+        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems, validationCode }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error('Failed to extract data');
+        throw new Error(data.error || 'Failed to extract data');
       }
 
-      const data = await response.json();
       setCsvUrl(data.csvUrl);
     } catch (error) {
       console.error('Error extracting data:', error);
@@ -138,6 +143,11 @@ export default function TelegramExtractor() {
                 <ol className="list-decimal list-inside space-y-2">
                   <li>
                     Go to{' '}
+                    
+                      href="https://my.telegram.org"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-500 hover:underline"
                     <a
                       href="https://my.telegram.org"
                       target="_blank"
@@ -150,8 +160,8 @@ export default function TelegramExtractor() {
                   </li>
                   <li>Click on 'API development tools'.</li>
                   <li>Fill in the form with your app details.</li>
-                  <li>Click on 'Create application'.</li>
-                  <li>You'll see your API ID and API Hash on the next page. Use these in the form below.</li>
+                  <li>Click on &apos;Create application&apos;.</li>
+                  <li>You&apos;ll see your API ID and API Hash on the next page. Use these in the form below.</li>
                 </ol>
               </AlertDescription>
             </Alert>
@@ -202,7 +212,7 @@ export default function TelegramExtractor() {
                   </div>
                 </RadioGroup>
                 <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Fetch Data'}
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Request Validation Code'}
                 </Button>
               </form>
             ) : (
