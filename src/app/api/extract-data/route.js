@@ -1,20 +1,27 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { Api, errors } from 'telegram'; // Import errors from 'telegram'
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
 
 export async function POST(req) {
   try {
     console.log('Extracting data: Start');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
+
+    // Validate phoneNumber
+    if (!phoneNumber || typeof phoneNumber !== 'string') {
+      console.error('Phone number is undefined or not a valid string');
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid or missing phone number',
+      }, { status: 400 });
+    }
+
     console.log(`Received request for ${extractType} extraction`);
     console.log(`Phone number: ${phoneNumber}`);
     console.log(`Validation code received: ${validationCode}`);
 
     // Lazy-load the Telegram client and StringSession only when needed
-    const { TelegramClient } = await import('telegram');
-    const { StringSession } = await import('telegram/sessions');
-
-    console.log('Initializing Telegram client...');
     const stringSession = new StringSession('');
     const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
@@ -24,6 +31,7 @@ export async function POST(req) {
       // First step: Request the code
       console.log('Requesting validation code...');
       await client.connect();
+
       try {
         const { phoneCodeHash } = await client.sendCode({
           apiId: parseInt(apiId),
@@ -40,13 +48,17 @@ export async function POST(req) {
         });
       } catch (error) {
         console.error('Error while sending code:', error);
-        if (error instanceof errors.PhoneNumberInvalidError) { // Updated to use errors.PhoneNumberInvalidError
+
+        // Dynamically import the specific Telegram errors
+        const { PhoneNumberInvalidError } = await import('telegram/errors');
+
+        if (error instanceof PhoneNumberInvalidError) {
           return NextResponse.json({
             success: false,
             error: 'Invalid phone number. Please check and try again.',
           }, { status: 400 });
         }
-        throw error;
+        throw error; // Re-throw other errors
       }
     }
 
