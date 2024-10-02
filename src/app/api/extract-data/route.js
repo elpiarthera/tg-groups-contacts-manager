@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { handleTelegramError } from '@/lib/apiUtils';
+import { Api } from 'telegram';
 
 export async function POST(req) {
   try {
     console.log('Extracting data: Start');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
     console.log(`Received request for ${extractType} extraction`);
+    console.log(`Phone number: ${phoneNumber}`);
     console.log(`Validation code received: ${validationCode}`);
 
     // Lazy-load the Telegram client and StringSession only when needed
@@ -23,110 +24,83 @@ export async function POST(req) {
       // First step: Request the code
       console.log('Requesting validation code...');
       await client.connect();
-      await client.sendCode({
-        apiId: parseInt(apiId),
-        apiHash: apiHash,
-        phoneNumber: phoneNumber,
-      });
+      try {
+        const { phoneCodeHash } = await client.sendCode({
+          apiId: parseInt(apiId),
+          apiHash,
+          phoneNumber,
+        });
 
-      console.log('Validation code requested successfully');
-      return NextResponse.json({
-        success: true,
-        message: 'Validation code sent to your phone. Please provide it in the next step.',
-        requiresValidation: true
-      });
+        console.log('Validation code requested successfully');
+        return NextResponse.json({
+          success: true,
+          message: 'Validation code sent to your phone. Please provide it in the next step.',
+          requiresValidation: true,
+          phoneCodeHash,
+        });
+      } catch (error) {
+        if (error instanceof Api.errors.PhoneNumberInvalidError) {
+          return NextResponse.json({
+            success: false,
+            error: 'Invalid phone number. Please check and try again.',
+          }, { status: 400 });
+        }
+        throw error;
+      }
     }
 
     console.log('Starting Telegram client session...');
-    await client.start({
-      phoneNumber: async () => phoneNumber,
-      password: async () => '',
-      phoneCode: async () => {
-        if (!validationCode) {
-          console.error('Validation code is empty');
-          throw new Error('Validation code is required');
-        }
-        return validationCode;
-      },
-      onError: (err) => {
-        console.error('Telegram client error:', err);
-        throw new Error('Telegram client failed to start');
-      },
-    });
-    console.log('Telegram client session started successfully');
+    try {
+      await client.start({
+        phoneNumber: async () => phoneNumber,
+        password: async () => '',
+        phoneCode: async () => validationCode,
+        onError: (err) => {
+          console.error('Telegram client error:', err);
+          throw err;
+        },
+      });
+      console.log('Telegram client session started successfully');
 
-    let extractedData = [];
-    
-    if (extractType === 'groups') {
-      console.log('Fetching groups...');
-      const dialogs = await client.getDialogs();
-      extractedData = dialogs.map(dialog => ({
-        id: dialog.id.toString(),
-        group_name: dialog.title,
-        participant_count: dialog.participantsCount || 0,
-        description: dialog.about || '',
-        invite_link: dialog.inviteLink || '',
-        type: dialog.isChannel ? 'channel' : 'group',
-      }));
-      console.log(`Fetched ${extractedData.length} groups`);
-
-      console.log('Inserting groups into Supabase...');
-      const { error } = await supabase
-        .from('groups')
-        .upsert(extractedData, { onConflict: ['id', 'user_id'] });
-
-      if (error) {
-        console.error('Supabase insertion error:', error);
-        throw error;
+      // Extract data based on extractType
+      let extractedData = [];
+      if (extractType === 'groups') {
+        const dialogs = await client.getDialogs();
+        extractedData = dialogs.map(dialog => ({
+          id: dialog.id.toString(),
+          name: dialog.title,
+          memberCount: dialog.participantsCount || 0,
+        }));
+      } else if (extractType === 'contacts') {
+        const contacts = await client.getContacts();
+        extractedData = contacts.map(contact => ({
+          id: contact.id.toString(),
+          name: `${contact.firstName} ${contact.lastName}`.trim(),
+          username: contact.username,
+          phoneNumber: contact.phone,
+        }));
       }
-      console.log('Groups inserted successfully');
 
-    } else if (extractType === 'contacts') {
-      console.log('Fetching contacts...');
-      const contacts = await client.getContacts();
-      extractedData = contacts.map(contact => ({
-        id: contact.id.toString(),
-        first_name: contact.firstName,
-        last_name: contact.lastName,
-        phone_number: contact.phone,
-        username: contact.username,
-        bio: contact.bio || '',
-        is_bot: contact.bot || false,
-      }));
-      console.log(`Fetched ${extractedData.length} contacts`);
+      console.log(`Extracted ${extractedData.length} ${extractType}`);
 
-      console.log('Inserting contacts into Supabase...');
-      const { error } = await supabase
-        .from('contacts')
-        .upsert(extractedData, { onConflict: ['id', 'user_id'] });
+      return NextResponse.json({
+        success: true,
+        items: extractedData,
+      });
 
-      if (error) {
-        console.error('Supabase insertion error:', error);
-        throw error;
-      }
-      console.log('Contacts inserted successfully');
-
-    } else {
-      throw new Error(`Invalid extractType: ${extractType}`);
+    } catch (error) {
+      console.error('Error starting Telegram client:', error);
+      return NextResponse.json({
+        success: false,
+        error: error.message || 'Failed to start Telegram client',
+      }, { status: 500 });
     }
-
-    console.log('Disconnecting Telegram client...');
-    await client.disconnect();
-    console.log('Telegram client disconnected');
-
-    console.log('Extraction completed successfully');
-    return NextResponse.json({
-      success: true,
-      message: `Data extracted and stored for ${extractType}`,
-      count: extractedData.length
-    });
 
   } catch (error) {
     console.error('Error in extract-data API:', error);
-    await handleTelegramError(error);
     return NextResponse.json({
       success: false,
-      error: error.message || 'An unknown error occurred'
+      error: error.message || 'An unknown error occurred',
     }, { status: 500 });
   }
 }
