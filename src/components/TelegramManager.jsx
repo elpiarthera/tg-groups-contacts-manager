@@ -25,6 +25,7 @@ export default function TelegramExtractor() {
   const [showResults, setShowResults] = useState(false);
   const [showValidationInput, setShowValidationInput] = useState(false);
   const [csvUrl, setCsvUrl] = useState(null);
+  const [validationCodeSent, setValidationCodeSent] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,7 +36,7 @@ export default function TelegramExtractor() {
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType }),
+        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber, extractType }),
       });
 
       const data = await response.json();
@@ -46,6 +47,7 @@ export default function TelegramExtractor() {
 
       if (data.requiresValidation) {
         setShowValidationInput(true);
+        setValidationCodeSent(true);
       } else {
         setItems(data.items || []);
         setShowResults(true);
@@ -161,7 +163,7 @@ export default function TelegramExtractor() {
               </AlertDescription>
             </Alert>
 
-            {!showValidationInput ? (
+            {!validationCodeSent ? (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="api-id">API ID</Label>
