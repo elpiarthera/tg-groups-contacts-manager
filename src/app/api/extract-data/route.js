@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { Api } from 'telegram';
+import { Api, errors } from 'telegram'; // Import errors from 'telegram'
 
 export async function POST(req) {
   try {
@@ -15,7 +15,7 @@ export async function POST(req) {
     const { StringSession } = await import('telegram/sessions');
 
     console.log('Initializing Telegram client...');
-    const stringSession = new StringSession(''); 
+    const stringSession = new StringSession('');
     const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -39,7 +39,8 @@ export async function POST(req) {
           phoneCodeHash,
         });
       } catch (error) {
-        if (error instanceof Api.errors.PhoneNumberInvalidError) {
+        console.error('Error while sending code:', error);
+        if (error instanceof errors.PhoneNumberInvalidError) { // Updated to use errors.PhoneNumberInvalidError
           return NextResponse.json({
             success: false,
             error: 'Invalid phone number. Please check and try again.',
