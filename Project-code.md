@@ -41,9 +41,11 @@ Directory Structure:
     │       └── utils.js
     ├── utils
     │   └── config.js
+    ├── .env
     ├── .gitignore
     ├── .vercelignore
     ├── components.json
+    ├── h origin main:master
     ├── jsconfig.json
     ├── next.config.js
     ├── package.json
@@ -59,22 +61,29 @@ File: /src/app/api/extract-data/route.js
 
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { Api } from 'telegram';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
 
 export async function POST(req) {
   try {
     console.log('Extracting data: Start');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
+
+    // Validate phoneNumber
+    if (!phoneNumber || typeof phoneNumber !== 'string') {
+      console.error('Phone number is undefined or not a valid string');
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid or missing phone number',
+      }, { status: 400 });
+    }
+
     console.log(`Received request for ${extractType} extraction`);
     console.log(`Phone number: ${phoneNumber}`);
     console.log(`Validation code received: ${validationCode}`);
 
     // Lazy-load the Telegram client and StringSession only when needed
-    const { TelegramClient } = await import('telegram');
-    const { StringSession } = await import('telegram/sessions');
-
-    console.log('Initializing Telegram client...');
-    const stringSession = new StringSession(''); 
+    const stringSession = new StringSession('');
     const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -83,6 +92,7 @@ export async function POST(req) {
       // First step: Request the code
       console.log('Requesting validation code...');
       await client.connect();
+
       try {
         const { phoneCodeHash } = await client.sendCode({
           apiId: parseInt(apiId),
@@ -98,13 +108,18 @@ export async function POST(req) {
           phoneCodeHash,
         });
       } catch (error) {
-        if (error instanceof Api.errors.PhoneNumberInvalidError) {
+        console.error('Error while sending code:', error);
+
+        // Dynamically import the specific Telegram errors
+        const { PhoneNumberInvalidError } = await import('telegram/errors');
+
+        if (error instanceof PhoneNumberInvalidError) {
           return NextResponse.json({
             success: false,
             error: 'Invalid phone number. Please check and try again.',
           }, { status: 400 });
         }
-        throw error;
+        throw error; // Re-throw other errors
       }
     }
 
@@ -1500,7 +1515,7 @@ export default function TelegramExtractor() {
 File: /src/lib/apiUtils.js
 ---
 
-import { FloodWaitError } from 'telegram';
+import { FloodWaitError, errors } from 'telegram'; // Import errors from telegram for more specific error handling
 
 const MAX_REQUESTS_PER_MINUTE = 20;
 const MAX_BACKOFF_TIME = 60000;
@@ -1526,11 +1541,16 @@ export function checkRateLimit() {
 export async function handleTelegramError(error) {
   if (error instanceof FloodWaitError) {
     console.warn(`Rate limit hit! Waiting for ${error.seconds} seconds...`);
-    await new Promise(resolve => setTimeout(resolve, error.seconds * 1000));
+    await new Promise(resolve => setTimeout(resolve, error.seconds * 1000)); // Wait for the duration specified by FloodWaitError
     backoffTime = Math.min(error.seconds * 1000, MAX_BACKOFF_TIME);
-  } else {
+  } 
+  else if (error instanceof errors.PhoneNumberInvalidError) { // Add specific handling for PhoneNumberInvalidError
+    console.error('Invalid phone number error:', error);
+    throw new Error('Invalid phone number. Please check and try again.');
+  }
+  else {
     console.error('Telegram API error:', error);
-    throw error;
+    throw error; // Re-throw any other errors to be handled elsewhere
   }
 }
 
@@ -1603,6 +1623,16 @@ File: /utils/config.js
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://tg-groups-contacts-managerv2.vercel.app/api';
 
 export { API_BASE_URL };
+
+
+
+---
+File: /.env
+---
+
+NEXT_PUBLIC_SUPABASE_URL=https://oisymxsvkchphdvxucdt.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pc3lteHN2a2NocGhkdnh1Y2R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mjc1MDcyMDYsImV4cCI6MjA0MzA4MzIwNn0.JsGtX4Kaq5g1ySxtT-oBYJNvNZ3LWEX5FOB5cN8wcAs
+NEXT_PUBLIC_API_BASE_URL=/api
 
 
 
@@ -1744,6 +1774,42 @@ File: /components.json
     "utils": "@/lib/utils"
   }
 }
+
+
+---
+File: /h origin main:master
+---
+
+[33mcommit 0c4a6a78842080bd0ac714787d69edec6ceac27e[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:22:28 2024 +0200
+
+    Update Telegram Manager, API routes, and fix import issues
+
+[33mcommit c20606efa3fa1e932967e5baf031e0a6dfa6b53d[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:18:50 2024 +0200
+
+    Update Supabase configuration and environment variables
+
+[33mcommit a5d9c7bb05f8a7beb5fb316ad357f0eef5f12991[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sun Sep 29 20:09:40 2024 +0200
+
+    MVP version ready for testing
+
+[33mcommit 490e6a289dc8cd158ea7e75ba71296654f22d72f[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sat Sep 28 23:13:04 2024 +0200
+
+    Configured API base URL and updated imports
+
+[33mcommit de148b641169912ee3170388a55706c45580e55e[m
+Author: elpiarthera <artherasmg@gmail.com>
+Date:   Sat Sep 28 22:30:27 2024 +0200
+
+    Updated TelegramManager to allow direct API ID, API Hash, and Phone Number submission
+
 
 
 ---
