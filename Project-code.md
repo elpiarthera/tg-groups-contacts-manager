@@ -8,8 +8,12 @@ Directory Structure:
     │   │   │       └── route.js
     │   │   ├── contacts
     │   │   │   └── page.js
+    │   │   ├── contacts-list
+    │   │   │   └── page.jsx
     │   │   ├── groups
     │   │   │   └── page.js
+    │   │   ├── groups-list
+    │   │   │   └── page.jsx
     │   │   ├── global.css
     │   │   ├── layout.js
     │   │   └── page.js
@@ -57,80 +61,25 @@ File: /src/app/api/extract-data/route.js
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { 
-  PhoneNumberInvalidError, 
-  FloodWaitError, 
-  PhoneCodeExpiredError, 
-  PhoneCodeInvalidError, 
-  ApiIdInvalidError,
-  errors
-} from 'telegram/errors';
-
-function handleErrorResponse(message, status = 500, error = null) {
-  console.error('[ERROR RESPONSE]:', message);
-  if (error instanceof Error) {
-    console.error('[ERROR STACK]:', error.stack);
-  }
-  return NextResponse.json({
-    success: false,
-    error: { 
-      code: status, 
-      message,
-      details: error ? error.toString() : undefined
-    },
-  }, { status });
-}
-
-async function retryAsync(fn, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (err instanceof FloodWaitError) {
-        console.warn(`[FLOOD WAIT]: Waiting for ${err.seconds} seconds.`);
-        await new Promise(resolve => setTimeout(resolve, err.seconds * 1000));
-      } else if (err instanceof PhoneNumberInvalidError) {
-        console.error('[PHONE NUMBER ERROR]:', err);
-        throw err; // Don't retry for invalid phone numbers
-      } else {
-        console.warn(`[RETRY]: Attempt ${i + 1} failed. Error:`, err);
-        if (i === retries - 1) throw err;
-        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
-      }
-    }
-  }
-}
+import { errors } from 'telegram';
 
 export async function POST(req) {
   let client;
   try {
     console.log('[START]: Extracting data');
-    const { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode, existingSessionString } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode, phoneCodeHash } = await req.json();
 
-    console.log('[DEBUG]: Received payload:', { 
-      apiId, 
-      apiHash, 
-      phoneNumber: rawPhoneNumber, 
-      extractType, 
-      validationCode: validationCode ? 'Provided' : 'Not provided', 
-      existingSessionString: existingSessionString ? 'Exists' : 'Not provided' 
-    });
-
-    // Input validation
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
       return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
     }
     if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
       return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
     }
-    if (!rawPhoneNumber || typeof rawPhoneNumber !== 'string' || rawPhoneNumber.trim() === '') {
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
       return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
     }
 
-    const validPhoneNumber = rawPhoneNumber.trim();
-    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
-
-    const stringSession = new StringSession(existingSessionString || '');
+    const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -141,85 +90,77 @@ export async function POST(req) {
     if (!validationCode) {
       console.log('[PROCESS]: Requesting validation code');
       try {
-        const { phoneCodeHash } = await client.sendCode({
+        const { phoneCodeHash: newPhoneCodeHash } = await client.sendCode({
           apiId: parseInt(apiId),
           apiHash,
-          phoneNumber: validPhoneNumber,
+          phoneNumber,
         });
-        
+
         console.log('[SUCCESS]: Validation code requested successfully');
         return NextResponse.json({
           success: true,
           message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
-          phoneCodeHash,
+          phoneCodeHash: newPhoneCodeHash,
         });
       } catch (error) {
         console.error('[REQUEST CODE ERROR]:', error);
-        if (error instanceof PhoneNumberInvalidError || (error.message && error.message.includes('PHONE_NUMBER_INVALID'))) {
-          return handleErrorResponse('Invalid phone number format. Please use the international format (e.g., +1234567890).', 400, error);
-        }
-        if (error instanceof errors.CastError) {
-          return handleErrorResponse('Invalid input. Please check all fields and try again.', 400, error);
+        if (error instanceof errors.PhoneNumberInvalidError) {
+          return handleErrorResponse('Invalid phone number. Please check and try again.', 400, error);
         }
         return handleErrorResponse('Failed to send the validation code. Please try again.', 500, error);
       }
-    } else {
-      console.log('[PROCESS]: Starting Telegram client session');
-      try {
-        await client.start({
-          phoneNumber: async () => validPhoneNumber,
-          password: async () => '',
-          phoneCode: async () => validationCode,
-          onError: (err) => {
-            console.error('[TELEGRAM CLIENT ERROR]:', err);
-            throw err;
-          },
-        });
+    }
 
-        console.log('[SUCCESS]: Telegram client session started successfully');
+    console.log('[PROCESS]: Starting Telegram client session');
+    try {
+      await client.start({
+        phoneNumber: async () => phoneNumber,
+        password: async () => '',
+        phoneCode: async () => validationCode,
+        onError: (err) => {
+          console.error('[TELEGRAM CLIENT ERROR]:', err);
+          throw err;
+        },
+      });
 
-        // Extract data based on extractType
-        let extractedData = [];
-        if (extractType === 'groups') {
-          const dialogs = await client.getDialogs();
-          extractedData = dialogs.map(dialog => ({
-            id: dialog.id.toString(),
-            name: dialog.title,
-            memberCount: dialog.participantsCount || 0,
-            type: dialog.isChannel ? 'channel' : 'group',
-            isPublic: !!dialog.username,
-          }));
-        } else if (extractType === 'contacts') {
-          const contacts = await client.getContacts();
-          extractedData = contacts.map(contact => ({
-            id: contact.id.toString(),
-            name: `${contact.firstName} ${contact.lastName}`.trim(),
-            username: contact.username,
-            phoneNumber: contact.phone,
-            isMutualContact: contact.mutualContact,
-          }));
-        }
+      console.log('[SUCCESS]: Telegram client session started successfully');
 
-        console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
-
-        return NextResponse.json({
-          success: true,
-          items: extractedData,
-          sessionString: client.session.save(),
-          sessionExpiresIn: '7 days',
-        });
-      } catch (error) {
-        console.error('[VALIDATION ERROR]: Error starting client session:', error);
-        if (error instanceof PhoneCodeExpiredError) {
-          return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
-        } else if (error instanceof PhoneCodeInvalidError) {
-          return handleErrorResponse('The verification code is incorrect. Please try again.', 400, error);
-        } else if (error instanceof ApiIdInvalidError) {
-          return handleErrorResponse('The API ID or API Hash is invalid. Please check your credentials.', 400, error);
-        }
-        return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+      let extractedData = [];
+      if (extractType === 'groups') {
+        const dialogs = await client.getDialogs();
+        extractedData = dialogs.map(dialog => ({
+          id: dialog.id.toString(),
+          name: dialog.title,
+          memberCount: dialog.participantsCount || 0,
+          type: dialog.isChannel ? 'channel' : 'group',
+          isPublic: !!dialog.username,
+        }));
+      } else if (extractType === 'contacts') {
+        const contacts = await client.getContacts();
+        extractedData = contacts.map(contact => ({
+          id: contact.id.toString(),
+          name: `${contact.firstName} ${contact.lastName}`.trim(),
+          username: contact.username,
+          phoneNumber: contact.phone,
+          isMutualContact: contact.mutualContact,
+        }));
       }
+
+      console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
+
+      return NextResponse.json({
+        success: true,
+        items: extractedData,
+        sessionString: client.session.save(),
+        sessionExpiresIn: '7 days',
+      });
+    } catch (error) {
+      console.error('[VALIDATION ERROR]: Error starting client session:', error);
+      if (error instanceof errors.PhoneCodeExpiredError) {
+        return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
+      }
+      return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
     }
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
@@ -234,6 +175,21 @@ export async function POST(req) {
       }
     }
   }
+}
+
+function handleErrorResponse(message, status = 500, error = null) {
+  console.error('[ERROR RESPONSE]:', message);
+  if (error && typeof error === 'object' && 'stack' in error) {
+    console.error('[ERROR STACK]:', error.stack);
+  }
+  return NextResponse.json({
+    success: false,
+    error: { 
+      code: status, 
+      message,
+      details: error ? error.toString() : undefined
+    },
+  }, { status });
 }
 
 
@@ -257,6 +213,24 @@ export default function ContactsPage() {
 
 
 ---
+File: /src/app/contacts-list/page.jsx
+---
+
+import React from 'react';
+
+const ContactsListPage = () => {
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">Contacts List</h1>
+      <p>This page will display the extracted contacts.</p>
+    </div>
+  );
+};
+
+export default ContactsListPage;
+
+
+---
 File: /src/app/groups/page.js
 ---
 
@@ -273,6 +247,24 @@ export default function GroupsPage() {
   )
 }
 
+
+
+---
+File: /src/app/groups-list/page.jsx
+---
+
+import React from 'react';
+
+const GroupsListPage = () => {
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">Groups List</h1>
+      <p>This page will display the extracted groups.</p>
+    </div>
+  );
+};
+
+export default GroupsListPage;
 
 
 ---
@@ -1137,7 +1129,8 @@ File: /src/components/TelegramManager.jsx
 
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { useRouter } from 'next/router';
 import { Loader2, InfoIcon } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1149,34 +1142,29 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export default function TelegramExtractor() {
+const TelegramManager = () => {
+  const router = useRouter();
   const [apiId, setApiId] = useState('');
   const [apiHash, setApiHash] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [validationCode, setValidationCode] = useState('');
   const [extractType, setExtractType] = useState('groups');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [items, setItems] = useState([]);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [showResults, setShowResults] = useState(false);
+  const [validationCode, setValidationCode] = useState('');
   const [showValidationInput, setShowValidationInput] = useState(false);
-  const [csvUrl, setCsvUrl] = useState(null);
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const validateInputs = () => {
-    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      setError('Please enter a valid API ID. It should be a positive number.');
+    if (!apiId || !apiHash || !phoneNumber) {
+      setError('Please fill in all fields');
       return false;
     }
-    const apiHashPattern = /^[a-f0-9]{32}$/;
-    if (!apiHash || !apiHashPattern.test(apiHash)) {
-      setError('Please enter a valid API Hash. It should be a 32-character hexadecimal string.');
+    if (isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a positive number');
       return false;
     }
-    const trimmedPhoneNumber = phoneNumber.trim();
-    if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
-      setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
+    if (!/^[a-f0-9]{32}$/.test(apiHash)) {
+      setError('API Hash should be a 32-character hexadecimal string');
       return false;
     }
     return true;
@@ -1193,16 +1181,19 @@ export default function TelegramExtractor() {
     }
 
     try {
-      console.log('[DEBUG]: Submitting request with:', { apiId, apiHash, phoneNumber: phoneNumber.trim(), extractType });
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        validationCode: showValidationInput ? validationCode : undefined,
+        phoneCodeHash: showValidationInput ? phoneCodeHash : undefined,
+      };
+      console.log('[DEBUG]: Submitting request with:', payload);
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          apiId: parseInt(apiId), 
-          apiHash, 
-          phoneNumber: phoneNumber.trim(), 
-          extractType 
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -1216,92 +1207,12 @@ export default function TelegramExtractor() {
         setShowValidationInput(true);
         setPhoneCodeHash(data.phoneCodeHash);
       } else {
-        setItems(data.items || []);
-        setShowResults(true);
+        // Redirect to the appropriate list page
+        router.push(`/${extractType}-list`);
       }
     } catch (error) {
       console.error('[ERROR]: Submit failed:', error);
       setError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleValidationSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setIsLoading(true);
-
-    if (!validationCode) {
-      setError('Please enter the validation code.');
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      console.log('[DEBUG]: Submitting validation code:', validationCode);
-      const response = await fetch('/api/extract-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          apiId: parseInt(apiId), 
-          apiHash, 
-          phoneNumber: phoneNumber.trim(), 
-          validationCode, 
-          extractType,
-          phoneCodeHash 
-        }),
-      });
-
-      const data = await response.json();
-      console.log('[DEBUG]: Received validation response:', data);
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to validate code or fetch data');
-      }
-
-      setItems(data.items || []);
-      setShowResults(true);
-      setShowValidationInput(false);
-    } catch (error) {
-      console.error('[ERROR]: Validation submit failed:', error);
-      setError(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSelectItem = (itemId) => {
-    setSelectedItems((prev) =>
-      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
-    );
-  };
-
-  const handleSelectAll = () => {
-    setSelectedItems(selectedItems.length === items.length ? [] : items.map((item) => item.id));
-  };
-
-  const handleExtract = async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/extract-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, extractType, selectedItems, validationCode }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to extract data');
-      }
-
-      setCsvUrl(data.csvUrl);
-    } catch (error) {
-      console.error('Error extracting data:', error);
-      setError('Failed to extract data. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -1345,57 +1256,51 @@ export default function TelegramExtractor() {
               </AlertDescription>
             </Alert>
 
-            {!showValidationInput ? (
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="api-id">API ID</Label>
-                  <Input
-                    id="api-id"
-                    value={apiId}
-                    onChange={(e) => setApiId(e.target.value)}
-                    required
-                    disabled={isLoading}
-                    placeholder="Enter your API ID"
-                  />
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="api-id">API ID</Label>
+                <Input
+                  id="api-id"
+                  value={apiId}
+                  onChange={(e) => setApiId(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter your API ID"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="api-hash">API Hash</Label>
+                <Input
+                  id="api-hash"
+                  value={apiHash}
+                  onChange={(e) => setApiHash(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter your API Hash"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
+                <Input
+                  id="phone-number"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value.trim())}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter your phone number (with country code)"
+                />
+              </div>
+              <RadioGroup value={extractType} onValueChange={setExtractType}>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+                  <Label htmlFor="groups">Extract Groups</Label>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="api-hash">API Hash</Label>
-                  <Input
-                    id="api-hash"
-                    value={apiHash}
-                    onChange={(e) => setApiHash(e.target.value)}
-                    required
-                    disabled={isLoading}
-                    placeholder="Enter your API Hash"
-                  />
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+                  <Label htmlFor="contacts">Extract Contacts</Label>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
-                  <Input
-                    id="phone-number"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value.trim())}
-                    required
-                    disabled={isLoading}
-                    placeholder="Enter your phone number (with country code)"
-                  />
-                </div>
-                <RadioGroup value={extractType} onValueChange={setExtractType}>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
-                    <Label htmlFor="groups">Extract Groups</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
-                    <Label htmlFor="contacts">Extract Contacts</Label>
-                  </div>
-                </RadioGroup>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Request Validation Code'}
-                </Button>
-              </form>
-            ) : (
-              <form onSubmit={handleValidationSubmit} className="space-y-4">
+              </RadioGroup>
+              {showValidationInput && (
                 <div className="space-y-2">
                   <Label htmlFor="validation-code">Validation Code</Label>
                   <Input
@@ -1407,88 +1312,17 @@ export default function TelegramExtractor() {
                     placeholder="Enter the code sent to your Telegram app"
                   />
                 </div>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Validate and Fetch Data'}
-                </Button>
-              </form>
-            )}
+              )}
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Request Validation Code'}
+              </Button>
+            </form>
 
             {error && (
               <Alert variant="destructive" className="mt-4">
                 <AlertTitle>Error</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
-            )}
-
-            {showResults && (
-              <div className="mt-8">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-2xl font-bold">{extractType === 'groups' ? 'Groups' : 'Contacts'} List</h2>
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="select-all"
-                      checked={selectedItems.length === items.length}
-                      onCheckedChange={handleSelectAll}
-                    />
-                    <label
-                      htmlFor="select-all"
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                    >
-                      {selectedItems.length === items.length ? 'Unselect All' : 'Select All'}
-                    </label>
-                  </div>
-                </div>
-                <div className="rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[50px]">Select</TableHead>
-                        <TableHead>Name</TableHead>
-                        {extractType === 'groups' ? (
-                          <TableHead>Members</TableHead>
-                        ) : (
-                          <>
-                            <TableHead>Username</TableHead>
-                            <TableHead>Phone Number</TableHead>
-                          </>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedItems.includes(item.id)}
-                              onCheckedChange={() => handleSelectItem(item.id)}
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">{item.name}</TableCell>
-                          {extractType === 'groups' ? (
-                            <TableCell>{item.memberCount}</TableCell>
-                          ) : (
-                            <>
-                              <TableCell>@{item.username}</TableCell>
-                              <TableCell>{item.phoneNumber}</TableCell>
-                            </>
-                          )}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <Button onClick={handleExtract} disabled={isLoading || selectedItems.length === 0} className="mt-4">
-                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : `Extract Selected ${extractType}`}
-                </Button>
-              </div>
-            )}
-
-            {csvUrl && (
-              <Button asChild className="mt-4 w-full">
-                <a href={csvUrl} download>
-                  Download CSV
-                </a>
-              </Button>
             )}
           </TabsContent>
           <TabsContent value="account">
@@ -1498,7 +1332,9 @@ export default function TelegramExtractor() {
       </CardContent>
     </Card>
   );
-}
+};
+
+export default TelegramManager;
 
 
 ---
@@ -1800,7 +1636,7 @@ File: /jsconfig.json
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["src/*"]
     }
   }
 }
@@ -1866,7 +1702,7 @@ File: /package.json
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hot-toast": "^2.4.1",
-    "telegram": "^2.25.11"
+    "telegram": "^2.25.15"
   }
 }
 
