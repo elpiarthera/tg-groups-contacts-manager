@@ -16,19 +16,17 @@ function handleErrorResponse(message, status = 500) {
 }
 
 async function retryAsync(fn, retries = 3) {
-	if (!fn) throw new Error('Function to retry is undefined.');
-
 	for (let i = 0; i < retries; i++) {
 		try {
 			return await fn();
 		} catch (err) {
-			if (i === retries - 1) throw err;
-			console.warn(`[RETRY]: Attempt ${i + 1} failed. Error: ${err.message}`);
-			if (err.message.includes('phone number is undefined')) {
-				console.warn('[RETRY ERROR]: Cannot retry as phoneNumber is undefined.');
-				throw err; // Throw immediately if phone number is undefined
+			if (!err.message || err.message.includes('phone number is undefined')) {
+				console.warn('[RETRY ABORT]: Invalid phone number detected. Aborting retries.');
+				throw err;
 			}
-			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+			console.warn(`[RETRY]: Attempt ${i + 1} failed. Error: ${err.message}`);
+			if (i === retries - 1) throw err;
+			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Backoff time
 		}
 	}
 }
@@ -37,18 +35,19 @@ export async function POST(req) {
 	let client;
 	try {
 		console.log('[START]: Extracting data');
-		const { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString } = await req.json();
+		const { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode, existingSessionString } = await req.json();
 
 		// Enhanced Logging and Validation
-		console.log('[DEBUG]: Received payload:', { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString: existingSessionString ? 'Exists' : 'Not provided' });
+		console.log('[DEBUG]: Received payload:', { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode, existingSessionString: existingSessionString ? 'Exists' : 'Not provided' });
 
 		// Validate phone number
-		if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
-			console.error('[VALIDATION ERROR]: Phone number is missing, undefined, or not a valid string');
+		if (!rawPhoneNumber || typeof rawPhoneNumber !== 'string' || rawPhoneNumber.trim() === '') {
+			console.error('[VALIDATION ERROR]: Phone number is missing or invalid');
 			return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
 		}
-		const trimmedPhoneNumber = phoneNumber.trim();
-		console.log('[DEBUG]: Valid phone number:', trimmedPhoneNumber);
+
+		const validPhoneNumber = rawPhoneNumber.trim(); // Ensuring immutability and correctness
+		console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
 		// Validate API ID
 		if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -70,7 +69,7 @@ export async function POST(req) {
 		}
 
 		console.log(`[INFO]: Received request for ${extractType} extraction`);
-		console.log(`[INFO]: Phone number: ${trimmedPhoneNumber}`);
+		console.log(`[INFO]: Phone number: ${validPhoneNumber}`);
 		console.log(`[INFO]: Validation code received: ${validationCode ? 'Yes' : 'No'}`);
 
 		// Use existing session string if provided, otherwise create a new one
@@ -79,22 +78,29 @@ export async function POST(req) {
 			connectionRetries: 5,
 		});
 
-		if (client.isConnected && client.session.userPhone !== trimmedPhoneNumber) {
-			console.warn('[INFO]: Disconnecting from old session to create a new one.');
+		if (client && client.isConnected()) {
+			console.warn('[DEBUG]: Client is already connected. Disconnecting...');
 			await client.disconnect();
 		}
+
+		console.log('[PROCESS]: Connecting new session.');
+		await retryAsync(async () => {
+			await client.connect();
+		});
 
 		if (!validationCode) {
 			console.log('[PROCESS]: Requesting validation code');
 			await retryAsync(async () => {
-				if (!trimmedPhoneNumber) throw new Error('Phone number is undefined. Cannot proceed.');
-				await client.connect();
+				console.log(`[DEBUG BEFORE CONNECT]: Connecting with phone number: ${validPhoneNumber}`);
+				if (!validPhoneNumber) {
+					throw new Error('Phone number is missing or undefined before connecting. Cannot proceed.');
+				}
 				const { phoneCodeHash } = await client.sendCode({
 					apiId: parseInt(apiId),
 					apiHash,
-					phoneNumber: trimmedPhoneNumber,
+					phoneNumber: validPhoneNumber,
 				});
-				console.log('[DEBUG]: Code sent successfully. Phone number used:', trimmedPhoneNumber);
+				console.log('[DEBUG]: Code sent successfully. Phone number used:', validPhoneNumber);
 				console.log('[SUCCESS]: Validation code requested successfully');
 				return NextResponse.json({
 					success: true,
@@ -107,8 +113,12 @@ export async function POST(req) {
 			console.log('[PROCESS]: Starting Telegram client session');
 			try {
 				await retryAsync(async () => {
+					console.log(`[DEBUG BEFORE START]: Starting client with phone number: ${validPhoneNumber}`);
+					if (!validPhoneNumber) {
+						throw new Error('Phone number is missing or undefined before starting client. Cannot proceed.');
+					}
 					await client.start({
-						phoneNumber: async () => trimmedPhoneNumber,
+						phoneNumber: async () => validPhoneNumber,
 						password: async () => '',
 						phoneCode: async () => validationCode,
 						onError: (err) => {
@@ -117,7 +127,7 @@ export async function POST(req) {
 						},
 					});
 				});
-				console.log('[DEBUG]: Client started successfully. Phone number used:', trimmedPhoneNumber);
+				console.log('[DEBUG]: Client started successfully. Phone number used:', validPhoneNumber);
 				console.log('[SUCCESS]: Telegram client session started successfully');
 
 				// Extract data based on extractType
@@ -151,8 +161,10 @@ export async function POST(req) {
 					sessionExpiresIn: '7 days', // Assuming a 7-day session validity
 				});
 			} catch (error) {
-				console.error('[TELEGRAM SESSION ERROR]: Error starting Telegram client:', error);
-				if (error instanceof PhoneCodeExpiredError) {
+				if (error.message.includes('phone number is undefined')) {
+					console.error('[PHONE NUMBER ERROR]:', error.message);
+					return handleErrorResponse('Invalid phone number. Please verify and try again.', 400);
+				} else if (error instanceof PhoneCodeExpiredError) {
 					return handleErrorResponse('The verification code has expired. Please request a new code.', 400);
 				} else if (error instanceof PhoneCodeInvalidError) {
 					return handleErrorResponse('The verification code is incorrect. Please try again.', 400);
@@ -160,7 +172,9 @@ export async function POST(req) {
 					console.warn(`[FLOOD WAIT]: Waiting for ${error.seconds} seconds.`);
 					return handleErrorResponse(`Rate limit reached. Please try again in ${error.seconds} seconds.`, 429);
 				}
-				return handleErrorResponse('An unexpected error occurred while starting the Telegram client. Please try again later.');
+				// Other general errors
+				console.error('[GENERAL ERROR]:', error);
+				return handleErrorResponse('An unexpected error occurred. Please try again later.', 500);
 			}
 		}
 	} catch (error) {

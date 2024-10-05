@@ -32,13 +32,14 @@ export default function TelegramExtractor() {
     setError(null);
     setIsLoading(true);
 
-    // Enhanced validation
     const trimmedPhoneNumber = phoneNumber.trim();
     if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
       setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
       setIsLoading(false);
+      console.warn('[FRONTEND VALIDATION ERROR]: Phone number is invalid.');
       return;
     }
+    console.log('[FRONTEND DEBUG]: Submitting with phone number:', trimmedPhoneNumber);
 
     try {
       console.log('[DEBUG]: Sending payload:', { apiId, apiHash, phoneNumber: trimmedPhoneNumber, extractType });
