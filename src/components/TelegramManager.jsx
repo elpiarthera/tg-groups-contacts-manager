@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/router';
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Loader2, InfoIcon } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,8 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TelegramManager = () => {
@@ -24,6 +22,10 @@ const TelegramManager = () => {
   const [phoneCodeHash, setPhoneCodeHash] = useState('');
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    // Any client-side only logic can go here
+  }, []);
 
   const validateInputs = () => {
     if (!apiId || !apiHash || !phoneNumber) {
@@ -77,9 +79,14 @@ const TelegramManager = () => {
       if (data.requiresValidation) {
         setShowValidationInput(true);
         setPhoneCodeHash(data.phoneCodeHash);
-      } else {
-        // Redirect to the appropriate list page
+        setError(null); // Clear any previous errors
+        alert('Please enter the validation code sent to your Telegram app.');
+      } else if (data.success) {
+        // If the extraction was successful, navigate to the appropriate list page
         router.push(`/${extractType}-list`);
+      } else {
+        // Handle any other scenarios
+        setError('An unexpected error occurred. Please try again.');
       }
     } catch (error) {
       console.error('[ERROR]: Submit failed:', error);
@@ -96,110 +103,73 @@ const TelegramManager = () => {
         <CardDescription>Telegram Groups and Contacts Manager</CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="extract" className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="extract">Extract Data</TabsTrigger>
-            <TabsTrigger value="account">Account Settings</TabsTrigger>
-          </TabsList>
-          <TabsContent value="extract">
-            <Alert className="mb-6">
-              <InfoIcon className="h-4 w-4" />
-              <AlertTitle>How to get API ID and API Hash</AlertTitle>
-              <AlertDescription>
-                <ol className="list-decimal list-inside space-y-2">
-                  <li>
-                    Go to{' '}
-                    <a
-                      href="https://my.telegram.org"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-500 hover:underline"
-                    >
-                      https://my.telegram.org
-                    </a>
-                    {' '}and log in with your Telegram account.
-                  </li>
-                  <li>Click on &apos;API development tools&apos;.</li>
-                  <li>Fill in the form with your app details.</li>
-                  <li>Click on &apos;Create application&apos;.</li>
-                  <li>You&apos;ll see your API ID and API Hash on the next page. Use these in the form below.</li>
-                </ol>
-              </AlertDescription>
-            </Alert>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="api-id">API ID</Label>
-                <Input
-                  id="api-id"
-                  value={apiId}
-                  onChange={(e) => setApiId(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  placeholder="Enter your API ID"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="api-hash">API Hash</Label>
-                <Input
-                  id="api-hash"
-                  value={apiHash}
-                  onChange={(e) => setApiHash(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  placeholder="Enter your API Hash"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
-                <Input
-                  id="phone-number"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value.trim())}
-                  required
-                  disabled={isLoading}
-                  placeholder="Enter your phone number (with country code)"
-                />
-              </div>
-              <RadioGroup value={extractType} onValueChange={setExtractType}>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
-                  <Label htmlFor="groups">Extract Groups</Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
-                  <Label htmlFor="contacts">Extract Contacts</Label>
-                </div>
-              </RadioGroup>
-              {showValidationInput && (
-                <div className="space-y-2">
-                  <Label htmlFor="validation-code">Validation Code</Label>
-                  <Input
-                    id="validation-code"
-                    value={validationCode}
-                    onChange={(e) => setValidationCode(e.target.value)}
-                    required
-                    disabled={isLoading}
-                    placeholder="Enter the code sent to your Telegram app"
-                  />
-                </div>
-              )}
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Request Validation Code'}
-              </Button>
-            </form>
-
-            {error && (
-              <Alert variant="destructive" className="mt-4">
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-          </TabsContent>
-          <TabsContent value="account">
-            <p>Account settings will be implemented in a future update.</p>
-          </TabsContent>
-        </Tabs>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="api-id">API ID</Label>
+            <Input
+              id="api-id"
+              value={apiId}
+              onChange={(e) => setApiId(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API ID"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="api-hash">API Hash</Label>
+            <Input
+              id="api-hash"
+              value={apiHash}
+              onChange={(e) => setApiHash(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API Hash"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
+            <Input
+              id="phone-number"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value.trim())}
+              required
+              disabled={isLoading}
+              placeholder="Enter your phone number (with country code)"
+            />
+          </div>
+          <RadioGroup value={extractType} onValueChange={setExtractType}>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+              <Label htmlFor="groups">Extract Groups</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+              <Label htmlFor="contacts">Extract Contacts</Label>
+            </div>
+          </RadioGroup>
+          {showValidationInput && (
+            <div className="space-y-2">
+              <Label htmlFor="validation-code">Validation Code</Label>
+              <Input
+                id="validation-code"
+                value={validationCode}
+                onChange={(e) => setValidationCode(e.target.value)}
+                required
+                disabled={isLoading}
+                placeholder="Enter the code sent to your Telegram app"
+              />
+            </div>
+          )}
+          <Button type="submit" disabled={isLoading}>
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (showValidationInput ? 'Verify Code' : 'Request Code')}
+          </Button>
+        </form>
+        {error && (
+          <Alert variant="destructive" className="mt-4">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </CardContent>
     </Card>
   );
