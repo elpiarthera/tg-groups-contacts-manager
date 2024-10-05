@@ -25,19 +25,19 @@ export function checkRateLimit() {
 export async function handleTelegramError(error) {
   console.error('Telegram API error:', error);
 
-  if (error instanceof FloodWaitError) {
-    console.warn(`Rate limit hit! Waiting for ${error.seconds} seconds...`);
-    await new Promise(resolve => setTimeout(resolve, error.seconds * 1000));
-    backoffTime = Math.min(error.seconds * 1000, MAX_BACKOFF_TIME);
+  if (error.message.includes('FLOOD_WAIT')) {
+    const seconds = parseInt(error.message.split('_')[2]);
+    console.warn(`Rate limit hit! Waiting for ${seconds} seconds...`);
+    await new Promise(resolve => setTimeout(resolve, seconds * 1000));
     return NextResponse.json({
       success: false,
       error: {
         code: 429,
-        message: `Rate limit exceeded. Please try again after ${error.seconds} seconds.`
+        message: `Rate limit exceeded. Please try again after ${seconds} seconds.`
       }
     }, { status: 429 });
   } 
-  else if (error instanceof errors.PhoneNumberInvalidError) {
+  else if (error.message.includes('PHONE_NUMBER_INVALID')) {
     return NextResponse.json({
       success: false,
       error: {
@@ -46,7 +46,7 @@ export async function handleTelegramError(error) {
       }
     }, { status: 400 });
   }
-  else if (error instanceof errors.PhoneCodeInvalidError) {
+  else if (error.message.includes('PHONE_CODE_INVALID')) {
     return NextResponse.json({
       success: false,
       error: {
@@ -55,7 +55,7 @@ export async function handleTelegramError(error) {
       }
     }, { status: 400 });
   }
-  else if (error instanceof errors.SessionPasswordNeededError) {
+  else if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
     return NextResponse.json({
       success: false,
       error: {
@@ -64,7 +64,7 @@ export async function handleTelegramError(error) {
       }
     }, { status: 400 });
   }
-  else if (error instanceof errors.AuthKeyUnregisteredError) {
+  else if (error.message.includes('AUTH_KEY_UNREGISTERED')) {
     return NextResponse.json({
       success: false,
       error: {

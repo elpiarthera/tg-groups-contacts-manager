@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { Api, errors } from 'telegram';
-import { checkRateLimit, handleTelegramError } from '@/lib/apiUtils';
+import { Api } from 'telegram/tl';
+import { errors } from 'telegram';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
 
 export async function POST(req) {
   let client;
@@ -120,22 +121,4 @@ export async function POST(req) {
       }
     }
   }
-}
-
-function handleErrorResponse(message, status = 500, error = null) {
-  console.error('[ERROR RESPONSE]:', message);
-  if (error && typeof error === 'object') {
-    if ('stack' in error) {
-      console.error('[ERROR STACK]:', error.stack);
-    }
-    return NextResponse.json({
-      success: false,
-      error: {
-        code: status,
-        message,
-        details: error.toString(),
-      },
-    }, { status });
-  }
-  return NextResponse.json({ success: false, error: { code: status, message } }, { status });
 }
