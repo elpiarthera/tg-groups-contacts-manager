@@ -32,17 +32,31 @@ export default function TelegramExtractor() {
     setError(null);
     setIsLoading(true);
 
+    // Validate API ID
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('Please enter a valid API ID. It should be a positive number.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate API Hash
+    const apiHashPattern = /^[a-f0-9]{32}$/;
+    if (!apiHash || !apiHashPattern.test(apiHash)) {
+      setError('Please enter a valid API Hash. It should be a 32-character hexadecimal string.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate phone number
     const trimmedPhoneNumber = phoneNumber.trim();
     if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
       setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
       setIsLoading(false);
-      console.warn('[FRONTEND VALIDATION ERROR]: Phone number is invalid.');
       return;
     }
-    console.log('[FRONTEND DEBUG]: Submitting with phone number:', trimmedPhoneNumber);
 
     try {
-      console.log('[DEBUG]: Sending payload:', { apiId, apiHash, phoneNumber: trimmedPhoneNumber, extractType });
+      console.log('[FRONTEND DEBUG]: Sending payload:', { apiId, apiHash, phoneNumber: trimmedPhoneNumber, extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
