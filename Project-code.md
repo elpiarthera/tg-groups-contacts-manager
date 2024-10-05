@@ -4,11 +4,7 @@ Directory Structure:
     ├── src
     │   ├── app
     │   │   ├── api
-    │   │   │   ├── extract-data
-    │   │   │   │   └── route.js
-    │   │   │   ├── fetch-data
-    │   │   │   │   └── route.js
-    │   │   │   └── telegram
+    │   │   │   └── extract-data
     │   │   │       └── route.js
     │   │   ├── contacts
     │   │   │   └── page.js
@@ -41,7 +37,6 @@ Directory Structure:
     │       └── utils.js
     ├── utils
     │   └── config.js
-    ├── .env
     ├── .gitignore
     ├── .vercelignore
     ├── components.json
@@ -63,233 +58,159 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import { PhoneNumberInvalidError, FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError } from 'telegram/errors';
 
-export async function POST(req) {
-  try {
-    console.log('Extracting data: Start');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
-
-    // Validate phoneNumber
-    if (!phoneNumber || typeof phoneNumber !== 'string') {
-      console.error('Phone number is undefined or not a valid string');
-      return NextResponse.json({
-        success: false,
-        error: 'Invalid or missing phone number',
-      }, { status: 400 });
-    }
-
-    console.log(`Received request for ${extractType} extraction`);
-    console.log(`Phone number: ${phoneNumber}`);
-    console.log(`Validation code received: ${validationCode}`);
-
-    // Lazy-load the Telegram client and StringSession only when needed
-    const stringSession = new StringSession('');
-    const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-      connectionRetries: 5,
-    });
-
-    if (!validationCode) {
-      // First step: Request the code
-      console.log('Requesting validation code...');
-      await client.connect();
-
-      try {
-        const { phoneCodeHash } = await client.sendCode({
-          apiId: parseInt(apiId),
-          apiHash,
-          phoneNumber,
-        });
-
-        console.log('Validation code requested successfully');
-        return NextResponse.json({
-          success: true,
-          message: 'Validation code sent to your phone. Please provide it in the next step.',
-          requiresValidation: true,
-          phoneCodeHash,
-        });
-      } catch (error) {
-        console.error('Error while sending code:', error);
-
-        // Dynamically import the specific Telegram errors
-        const { PhoneNumberInvalidError } = await import('telegram/errors');
-
-        if (error instanceof PhoneNumberInvalidError) {
-          return NextResponse.json({
-            success: false,
-            error: 'Invalid phone number. Please check and try again.',
-          }, { status: 400 });
-        }
-        throw error; // Re-throw other errors
-      }
-    }
-
-    console.log('Starting Telegram client session...');
-    try {
-      await client.start({
-        phoneNumber: async () => phoneNumber,
-        password: async () => '',
-        phoneCode: async () => validationCode,
-        onError: (err) => {
-          console.error('Telegram client error:', err);
-          throw err;
-        },
-      });
-      console.log('Telegram client session started successfully');
-
-      // Extract data based on extractType
-      let extractedData = [];
-      if (extractType === 'groups') {
-        const dialogs = await client.getDialogs();
-        extractedData = dialogs.map(dialog => ({
-          id: dialog.id.toString(),
-          name: dialog.title,
-          memberCount: dialog.participantsCount || 0,
-        }));
-      } else if (extractType === 'contacts') {
-        const contacts = await client.getContacts();
-        extractedData = contacts.map(contact => ({
-          id: contact.id.toString(),
-          name: `${contact.firstName} ${contact.lastName}`.trim(),
-          username: contact.username,
-          phoneNumber: contact.phone,
-        }));
-      }
-
-      console.log(`Extracted ${extractedData.length} ${extractType}`);
-
-      return NextResponse.json({
-        success: true,
-        items: extractedData,
-      });
-
-    } catch (error) {
-      console.error('Error starting Telegram client:', error);
-      return NextResponse.json({
-        success: false,
-        error: error.message || 'Failed to start Telegram client',
-      }, { status: 500 });
-    }
-
-  } catch (error) {
-    console.error('Error in extract-data API:', error);
-    return NextResponse.json({
-      success: false,
-      error: error.message || 'An unknown error occurred',
-    }, { status: 500 });
-  }
+function handleErrorResponse(message, status = 500) {
+	return NextResponse.json({
+		success: false,
+		error: message,
+	}, { status });
 }
 
-
-
----
-File: /src/app/api/fetch-data/route.js
----
-
-import { NextResponse } from 'next/server';
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { supabase } from '@/lib/supabase';
-
-export async function POST(req) {
-  const { apiId, apiHash, phoneNumber, extractType } = await req.json();
-
-  const stringSession = new StringSession('');
-  const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-    connectionRetries: 5,
-  });
-
-  try {
-    await client.start({
-      phoneNumber: async () => phoneNumber,
-      password: async () => '',
-      phoneCode: async () => '',
-      onError: (err) => console.log(err),
-    });
-
-    let data;
-    if (extractType === 'groups') {
-      const dialogs = await client.getDialogs();
-      data = dialogs.map(dialog => ({
-        id: dialog.id.toString(),
-        name: dialog.title,
-        type: dialog.isGroup ? 'group' : 'channel',
-      }));
-    } else {
-      const contacts = await client.getContacts();
-      data = contacts.map(contact => ({
-        id: contact.id.toString(),
-        name: `${contact.firstName} ${contact.lastName}`.trim(),
-        username: contact.username,
-        phone: contact.phone,
-      }));
-    }
-
-    const { error } = await supabase.from(extractType).upsert(data, { onConflict: 'id' });
-
-    if (error) throw error;
-
-    return NextResponse.json({ success: true, message: `${extractType} fetched and updated successfully` });
-  } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  } finally {
-    await client.disconnect();
-  }
+async function retryAsync(fn, retries = 3) {
+	for (let i = 0; i < retries; i++) {
+		try {
+			return await fn();
+		} catch (err) {
+			if (i === retries - 1) throw err;
+			console.warn(`[RETRY]: Attempt ${i + 1} failed. Retrying...`);
+			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+		}
+	}
 }
 
-
----
-File: /src/app/api/telegram/route.js
----
-
-import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-
 export async function POST(req) {
-  const { apiId, apiHash, phoneNumber } = await req.json();
+	let client;
+	try {
+		console.log('[START]: Extracting data');
+		const { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString } = await req.json();
 
-  // Lazy-load the Telegram client and StringSession only when needed
-  const { TelegramClient } = await import('telegram');
-  const { StringSession } = await import('telegram/sessions');
+		// Validate API ID
+		if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+			console.error('[VALIDATION ERROR]: Invalid API ID');
+			return handleErrorResponse('Invalid API ID. It should be a positive number.', 400);
+		}
 
-  const stringSession = new StringSession('');
-  const client = new TelegramClient(stringSession, apiId, apiHash, {
-    connectionRetries: 5,
-  });
+		// Validate API Hash
+		const apiHashPattern = /^[a-f0-9]{32}$/;
+		if (!apiHash || !apiHashPattern.test(apiHash)) {
+			console.error('[VALIDATION ERROR]: Invalid API Hash');
+			return handleErrorResponse('Invalid API Hash. It should be a 32-character hexadecimal string.', 400);
+		}
 
-  try {
-    await client.start({
-      phoneNumber: async () => phoneNumber,
-      password: async () => '',
-      phoneCode: async () => '',
-      onError: (err) => console.log(err),
-    });
+		// Validate phone number
+		const phoneNumberPattern = /^\+\d{10,15}$/;
+		if (!phoneNumber || !phoneNumberPattern.test(phoneNumber)) {
+			console.error('[VALIDATION ERROR]: Phone number is undefined or not in the correct format');
+			return handleErrorResponse('Invalid or missing phone number. Ensure it is in the format +1234567890.', 400);
+		}
 
-    // Fetch groups from the Telegram API
-    const groups = await client.getDialogs();
-    const groupsData = groups.map(group => ({
-      id: group.id,
-      group_name: group.title,
-      description: group.about || '',
-      invite_link: group.inviteLink || '',
-    }));
+		// Validate extractType
+		if (extractType !== 'groups' && extractType !== 'contacts') {
+			console.error('[VALIDATION ERROR]: Invalid extract type');
+			return handleErrorResponse('Invalid extract type. Allowed values are "groups" or "contacts".', 400);
+		}
 
-    // Upsert groups data into Supabase
-    const { data, error } = await supabase
-      .from('groups')
-      .upsert(groupsData, { onConflict: 'id' });
+		console.log(`[INFO]: Received request for ${extractType} extraction`);
+		console.log(`[INFO]: Phone number: ${phoneNumber}`);
+		console.log(`[INFO]: Validation code received: ${validationCode ? 'Yes' : 'No'}`);
 
-    if (error) throw error;
+		// Use existing session string if provided, otherwise create a new one
+		const stringSession = new StringSession(existingSessionString || '');
+		client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+			connectionRetries: 5,
+		});
 
-    return NextResponse.json({ success: true, message: 'Groups fetched and updated successfully' });
-  } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-  } finally {
-    await client.disconnect();
-  }
+		if (!validationCode) {
+			console.log('[PROCESS]: Requesting validation code');
+			await retryAsync(async () => {
+				await client.connect();
+				const { phoneCodeHash } = await client.sendCode({
+					apiId: parseInt(apiId),
+					apiHash,
+					phoneNumber,
+				});
+				console.log('[SUCCESS]: Validation code requested successfully');
+				return NextResponse.json({
+					success: true,
+					message: 'Validation code sent to your phone. Please provide it in the next step.',
+					requiresValidation: true,
+					phoneCodeHash,
+				});
+			});
+		} else {
+			console.log('[PROCESS]: Starting Telegram client session');
+			try {
+				await retryAsync(async () => {
+					await client.start({
+						phoneNumber: async () => phoneNumber,
+						password: async () => '',
+						phoneCode: async () => validationCode,
+						onError: (err) => {
+							console.error('[TELEGRAM CLIENT ERROR]:', err);
+							throw err;
+						},
+					});
+				});
+				console.log('[SUCCESS]: Telegram client session started successfully');
+
+				// Extract data based on extractType
+				let extractedData = [];
+				if (extractType === 'groups') {
+					const dialogs = await client.getDialogs();
+					extractedData = dialogs.map(dialog => ({
+						id: dialog.id.toString(),
+						name: dialog.title,
+						memberCount: dialog.participantsCount || 0,
+						type: dialog.isChannel ? 'channel' : 'group',
+						isPublic: !!dialog.username,
+					}));
+				} else if (extractType === 'contacts') {
+					const contacts = await client.getContacts();
+					extractedData = contacts.map(contact => ({
+						id: contact.id.toString(),
+						name: `${contact.firstName} ${contact.lastName}`.trim(),
+						username: contact.username,
+						phoneNumber: contact.phone,
+						isMutualContact: contact.mutualContact,
+					}));
+				}
+
+				console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
+
+				return NextResponse.json({
+					success: true,
+					items: extractedData,
+					sessionString: client.session.save(), // Save the session string for future use
+					sessionExpiresIn: '7 days', // Assuming a 7-day session validity
+				});
+			} catch (error) {
+				console.error('[TELEGRAM SESSION ERROR]: Error starting Telegram client:', error);
+				if (error instanceof PhoneCodeExpiredError) {
+					return handleErrorResponse('The verification code has expired. Please request a new code.', 400);
+				} else if (error instanceof PhoneCodeInvalidError) {
+					return handleErrorResponse('The verification code is incorrect. Please try again.', 400);
+				} else if (error instanceof FloodWaitError) {
+					console.warn(`[FLOOD WAIT]: Waiting for ${error.seconds} seconds.`);
+					return handleErrorResponse(`Rate limit reached. Please try again in ${error.seconds} seconds.`, 429);
+				}
+				return handleErrorResponse('An unexpected error occurred while starting the Telegram client. Please try again later.');
+			}
+		}
+	} catch (error) {
+		console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+		return handleErrorResponse('An unexpected error occurred. Please try again later.');
+	} finally {
+		if (client) {
+			try {
+				await client.disconnect();
+				console.log('[CLEANUP]: Telegram client disconnected successfully');
+			} catch (disconnectError) {
+				console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
+			}
+		}
+	}
 }
-
 
 
 ---
@@ -1623,16 +1544,6 @@ File: /utils/config.js
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://tg-groups-contacts-managerv2.vercel.app/api';
 
 export { API_BASE_URL };
-
-
-
----
-File: /.env
----
-
-NEXT_PUBLIC_SUPABASE_URL=https://oisymxsvkchphdvxucdt.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pc3lteHN2a2NocGhkdnh1Y2R0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mjc1MDcyMDYsImV4cCI6MjA0MzA4MzIwNn0.JsGtX4Kaq5g1ySxtT-oBYJNvNZ3LWEX5FOB5cN8wcAs
-NEXT_PUBLIC_API_BASE_URL=/api
 
 
 

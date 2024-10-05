@@ -32,17 +32,26 @@ export default function TelegramExtractor() {
     setError(null);
     setIsLoading(true);
 
+    // Enhanced validation
+    const trimmedPhoneNumber = phoneNumber.trim();
+    if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
+      setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
+      setIsLoading(false);
+      return;
+    }
+
     try {
+      console.log('[DEBUG]: Sending payload:', { apiId, apiHash, phoneNumber: trimmedPhoneNumber, extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber, extractType }),
+        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber: trimmedPhoneNumber, extractType }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to initiate extraction');
+        throw new Error(data.error?.message || 'Failed to initiate extraction');
       }
 
       if (data.requiresValidation) {
@@ -65,7 +74,14 @@ export default function TelegramExtractor() {
     setError(null);
     setIsLoading(true);
 
+    if (!validationCode) {
+      setError('Please enter the validation code.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
+      console.log('[DEBUG]: Sending validation payload:', { apiId, apiHash, phoneNumber, validationCode, extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,7 +208,7 @@ export default function TelegramExtractor() {
                   <Input
                     id="phone-number"
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={(e) => setPhoneNumber(e.target.value.trim())}
                     required
                     disabled={isLoading}
                     placeholder="Enter your phone number (with country code)"

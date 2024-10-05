@@ -5,19 +5,29 @@ import { StringSession } from 'telegram/sessions';
 import { PhoneNumberInvalidError, FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError } from 'telegram/errors';
 
 function handleErrorResponse(message, status = 500) {
+	console.error('[ERROR RESPONSE]:', message);
 	return NextResponse.json({
 		success: false,
-		error: message,
+		error: {
+			code: status,
+			message,
+		},
 	}, { status });
 }
 
 async function retryAsync(fn, retries = 3) {
+	if (!fn) throw new Error('Function to retry is undefined.');
+
 	for (let i = 0; i < retries; i++) {
 		try {
 			return await fn();
 		} catch (err) {
 			if (i === retries - 1) throw err;
-			console.warn(`[RETRY]: Attempt ${i + 1} failed. Retrying...`);
+			console.warn(`[RETRY]: Attempt ${i + 1} failed. Error: ${err.message}`);
+			if (err.message.includes('phone number is undefined')) {
+				console.warn('[RETRY ERROR]: Cannot retry as phoneNumber is undefined.');
+				throw err;
+			}
 			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
 		}
 	}
@@ -28,6 +38,16 @@ export async function POST(req) {
 	try {
 		console.log('[START]: Extracting data');
 		const { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString } = await req.json();
+
+		// Enhanced Logging and Validation
+		console.log('[DEBUG]: Received payload:', { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString: existingSessionString ? 'Exists' : 'Not provided' });
+
+		// Validate phone number
+		if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+			console.error('[VALIDATION ERROR]: Phone number is missing, undefined, or not a valid string');
+			return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+		}
+		console.log('[DEBUG]: Valid phone number:', phoneNumber);
 
 		// Validate API ID
 		if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -40,13 +60,6 @@ export async function POST(req) {
 		if (!apiHash || !apiHashPattern.test(apiHash)) {
 			console.error('[VALIDATION ERROR]: Invalid API Hash');
 			return handleErrorResponse('Invalid API Hash. It should be a 32-character hexadecimal string.', 400);
-		}
-
-		// Validate phone number
-		const phoneNumberPattern = /^\+\d{10,15}$/;
-		if (!phoneNumber || !phoneNumberPattern.test(phoneNumber)) {
-			console.error('[VALIDATION ERROR]: Phone number is undefined or not in the correct format');
-			return handleErrorResponse('Invalid or missing phone number. Ensure it is in the format +1234567890.', 400);
 		}
 
 		// Validate extractType
@@ -64,6 +77,11 @@ export async function POST(req) {
 		client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
 			connectionRetries: 5,
 		});
+
+		if (client.isConnected && client.session.userPhone !== phoneNumber) {
+			console.warn('[INFO]: Disconnecting from old session to create a new one.');
+			await client.disconnect();
+		}
 
 		if (!validationCode) {
 			console.log('[PROCESS]: Requesting validation code');
