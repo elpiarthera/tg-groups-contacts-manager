@@ -1,13 +1,27 @@
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { PhoneNumberInvalidError, FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError, ApiIdInvalidError } from 'telegram/errors';
+import { 
+  PhoneNumberInvalidError, 
+  FloodWaitError, 
+  PhoneCodeExpiredError, 
+  PhoneCodeInvalidError, 
+  ApiIdInvalidError,
+  errors
+} from 'telegram/errors';
 
-function handleErrorResponse(message, status = 500) {
+function handleErrorResponse(message, status = 500, error = null) {
   console.error('[ERROR RESPONSE]:', message);
+  if (error instanceof Error) {
+    console.error('[ERROR STACK]:', error.stack);
+  }
   return NextResponse.json({
     success: false,
-    error: { code: status, message },
+    error: { 
+      code: status, 
+      message,
+      details: error ? error.toString() : undefined
+    },
   }, { status });
 }
 
@@ -37,7 +51,14 @@ export async function POST(req) {
     console.log('[START]: Extracting data');
     const { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode, existingSessionString } = await req.json();
 
-    console.log('[DEBUG]: Received payload:', { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode: validationCode ? 'Provided' : 'Not provided', existingSessionString: existingSessionString ? 'Exists' : 'Not provided' });
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, 
+      apiHash, 
+      phoneNumber: rawPhoneNumber, 
+      extractType, 
+      validationCode: validationCode ? 'Provided' : 'Not provided', 
+      existingSessionString: existingSessionString ? 'Exists' : 'Not provided' 
+    });
 
     // Input validation
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -64,13 +85,10 @@ export async function POST(req) {
     if (!validationCode) {
       console.log('[PROCESS]: Requesting validation code');
       try {
-        const { phoneCodeHash } = await retryAsync(async () => {
-          console.log('[DEBUG]: Sending code for phone number:', validPhoneNumber);
-          return await client.sendCode({
-            apiId: parseInt(apiId),
-            apiHash,
-            phoneNumber: validPhoneNumber,
-          });
+        const { phoneCodeHash } = await client.sendCode({
+          apiId: parseInt(apiId),
+          apiHash,
+          phoneNumber: validPhoneNumber,
         });
         
         console.log('[SUCCESS]: Validation code requested successfully');
@@ -82,10 +100,13 @@ export async function POST(req) {
         });
       } catch (error) {
         console.error('[REQUEST CODE ERROR]:', error);
-        if (error instanceof PhoneNumberInvalidError) {
-          return handleErrorResponse('Invalid phone number. Please check and try again.', 400);
+        if (error instanceof PhoneNumberInvalidError || (error.message && error.message.includes('PHONE_NUMBER_INVALID'))) {
+          return handleErrorResponse('Invalid phone number format. Please use the international format (e.g., +1234567890).', 400, error);
         }
-        return handleErrorResponse('Failed to send the validation code. Please try again.', 500);
+        if (error instanceof errors.CastError) {
+          return handleErrorResponse('Invalid input. Please check all fields and try again.', 400, error);
+        }
+        return handleErrorResponse('Failed to send the validation code. Please try again.', 500, error);
       }
     } else {
       console.log('[PROCESS]: Starting Telegram client session');
@@ -135,18 +156,18 @@ export async function POST(req) {
       } catch (error) {
         console.error('[VALIDATION ERROR]: Error starting client session:', error);
         if (error instanceof PhoneCodeExpiredError) {
-          return handleErrorResponse('The verification code has expired. Please request a new code.', 400);
+          return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
         } else if (error instanceof PhoneCodeInvalidError) {
-          return handleErrorResponse('The verification code is incorrect. Please try again.', 400);
+          return handleErrorResponse('The verification code is incorrect. Please try again.', 400, error);
         } else if (error instanceof ApiIdInvalidError) {
-          return handleErrorResponse('The API ID or API Hash is invalid. Please check your credentials.', 400);
+          return handleErrorResponse('The API ID or API Hash is invalid. Please check your credentials.', 400, error);
         }
-        return handleErrorResponse('An unexpected error occurred. Please try again later.', 500);
+        return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
       }
     }
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
-    return handleErrorResponse('An unexpected error occurred. Please try again later.');
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
   } finally {
     if (client) {
       try {
