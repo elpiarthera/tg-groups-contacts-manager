@@ -61,7 +61,9 @@ File: /src/app/api/extract-data/route.js
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { Api } from 'telegram';
+import { Api } from 'telegram/tl';
+import { errors } from 'telegram';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
 
 export async function POST(req) {
   let client;
@@ -89,6 +91,8 @@ export async function POST(req) {
     const validPhoneNumber = phoneNumber.trim();
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
+    checkRateLimit(); // Check if we're within rate limits
+
     const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
@@ -103,7 +107,7 @@ export async function POST(req) {
         const { phoneCodeHash: newPhoneCodeHash } = await client.sendCode({
           apiId: parseInt(apiId),
           apiHash,
-          phoneNumber: validPhoneNumber,
+          phone: validPhoneNumber,
         });
 
         console.log('[SUCCESS]: Validation code requested successfully');
@@ -114,11 +118,7 @@ export async function POST(req) {
           phoneCodeHash: newPhoneCodeHash,
         });
       } catch (error) {
-        console.error('[REQUEST CODE ERROR]:', error);
-        if (error instanceof Api.errors.PhoneNumberInvalidError) {
-          return handleErrorResponse('Invalid phone number. Please check and try again.', 400, error);
-        }
-        return handleErrorResponse('Failed to send the validation code. Please try again.', 500, error);
+        return handleTelegramError(error);
       }
     }
 
@@ -166,11 +166,7 @@ export async function POST(req) {
         sessionExpiresIn: '7 days',
       });
     } catch (error) {
-      console.error('[VALIDATION ERROR]: Error starting client session:', error);
-      if (error instanceof Api.errors.PhoneCodeExpiredError) {
-        return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
-      }
-      return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+      return handleTelegramError(error);
     }
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
@@ -187,20 +183,6 @@ export async function POST(req) {
   }
 }
 
-function handleErrorResponse(message, status = 500, error = null) {
-  console.error('[ERROR RESPONSE]:', message);
-  if (error && typeof error === 'object' && 'stack' in error) {
-    console.error('[ERROR STACK]:', error.stack);
-  }
-  return NextResponse.json({
-    success: false,
-    error: {
-      code: status,
-      message,
-      details: error ? error.toString() : undefined,
-    },
-  }, { status });
-}
 
 
 ---
@@ -1137,18 +1119,15 @@ export default function GroupsList() {
 File: /src/components/TelegramManager.jsx
 ---
 
-'use client';
-
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, InfoIcon } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TelegramManager = () => {
   const router = useRouter();
@@ -1162,21 +1141,17 @@ const TelegramManager = () => {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    // Any client-side only logic can go here
-  }, []);
-
   const validateInputs = () => {
-    if (!apiId || !apiHash || !phoneNumber) {
-      setError('Please fill in all fields');
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a valid positive number');
       return false;
     }
-    if (isNaN(apiId) || parseInt(apiId) <= 0) {
-      setError('API ID must be a positive number');
-      return false;
-    }
-    if (!/^[a-f0-9]{32}$/.test(apiHash)) {
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
       setError('API Hash should be a 32-character hexadecimal string');
+      return false;
+    }
+    if (!phoneNumber || phoneNumber.trim() === '') {
+      setError('Please enter a valid phone number');
       return false;
     }
     return true;
@@ -1218,13 +1193,11 @@ const TelegramManager = () => {
       if (data.requiresValidation) {
         setShowValidationInput(true);
         setPhoneCodeHash(data.phoneCodeHash);
-        setError(null); // Clear any previous errors
+        setError(null);
         alert('Please enter the validation code sent to your Telegram app.');
       } else if (data.success) {
-        // If the extraction was successful, navigate to the appropriate list page
         router.push(`/${extractType}-list`);
       } else {
-        // Handle any other scenarios
         setError('An unexpected error occurred. Please try again.');
       }
     } catch (error) {
@@ -1239,7 +1212,6 @@ const TelegramManager = () => {
     <Card className="w-full max-w-4xl mx-auto">
       <CardHeader>
         <CardTitle>Telegram Extractor</CardTitle>
-        <CardDescription>Telegram Groups and Contacts Manager</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1266,11 +1238,11 @@ const TelegramManager = () => {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="phone-number">Phone Number (for Telegram API)</Label>
+            <Label htmlFor="phone-number">Phone Number</Label>
             <Input
               id="phone-number"
               value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value.trim())}
+              onChange={(e) => setPhoneNumber(e.target.value)}
               required
               disabled={isLoading}
               placeholder="Enter your phone number (with country code)"
@@ -1317,18 +1289,20 @@ const TelegramManager = () => {
 export default TelegramManager;
 
 
+
 ---
 File: /src/lib/apiUtils.js
 ---
 
-import { FloodWaitError, errors } from 'telegram'; // Import errors from telegram for more specific error handling
+import { FloodWaitError, errors } from 'telegram';
+import { NextResponse } from 'next/server';
 
 const MAX_REQUESTS_PER_MINUTE = 20;
-const MAX_BACKOFF_TIME = 60000;
+const MAX_BACKOFF_TIME = 60000; // 1 minute
 
 let requestCount = 0;
 let lastRequestTime = Date.now();
-let backoffTime = 2000;
+let backoffTime = 2000; // Start with 2 seconds
 
 export function checkRateLimit() {
   const currentTime = Date.now();
@@ -1345,24 +1319,93 @@ export function checkRateLimit() {
 }
 
 export async function handleTelegramError(error) {
-  if (error instanceof FloodWaitError) {
-    console.warn(`Rate limit hit! Waiting for ${error.seconds} seconds...`);
-    await new Promise(resolve => setTimeout(resolve, error.seconds * 1000)); // Wait for the duration specified by FloodWaitError
-    backoffTime = Math.min(error.seconds * 1000, MAX_BACKOFF_TIME);
+  console.error('Telegram API error:', error);
+
+  if (error.message.includes('FLOOD_WAIT')) {
+    const seconds = parseInt(error.message.split('_')[2]);
+    console.warn(`Rate limit hit! Waiting for ${seconds} seconds...`);
+    await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 429,
+        message: `Rate limit exceeded. Please try again after ${seconds} seconds.`
+      }
+    }, { status: 429 });
   } 
-  else if (error instanceof errors.PhoneNumberInvalidError) { // Add specific handling for PhoneNumberInvalidError
-    console.error('Invalid phone number error:', error);
-    throw new Error('Invalid phone number. Please check and try again.');
+  else if (error.message.includes('PHONE_NUMBER_INVALID')) {
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 400,
+        message: 'Invalid phone number. Please check and try again.'
+      }
+    }, { status: 400 });
+  }
+  else if (error.message.includes('PHONE_CODE_INVALID')) {
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 400,
+        message: 'Invalid verification code. Please try again.'
+      }
+    }, { status: 400 });
+  }
+  else if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 400,
+        message: 'Two-factor authentication is enabled. Please disable it temporarily to use this service.'
+      }
+    }, { status: 400 });
+  }
+  else if (error.message.includes('AUTH_KEY_UNREGISTERED')) {
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 401,
+        message: 'The provided API credentials are invalid or have been revoked.'
+      }
+    }, { status: 401 });
   }
   else {
-    console.error('Telegram API error:', error);
-    throw error; // Re-throw any other errors to be handled elsewhere
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 500,
+        message: 'An unexpected error occurred. Please try again later.',
+        details: error.toString()
+      }
+    }, { status: 500 });
   }
 }
 
 export function handleSupabaseError(error) {
   console.error('Supabase error:', error);
-  throw new Error('Database operation failed');
+  return NextResponse.json({
+    success: false,
+    error: {
+      code: 500,
+      message: 'Database operation failed',
+      details: error.toString()
+    }
+  }, { status: 500 });
+}
+
+export function handleErrorResponse(message, status = 500, error = null) {
+  console.error('[ERROR RESPONSE]:', message);
+  if (error && typeof error === 'object' && 'stack' in error) {
+    console.error('[ERROR STACK]:', error.stack);
+  }
+  return NextResponse.json({
+    success: false,
+    error: {
+      code: status,
+      message,
+      details: error ? error.toString() : undefined,
+    },
+  }, { status });
 }
 
 
@@ -1646,7 +1689,7 @@ File: /package.json
 {
   "name": "tg-groups-and-contacts-extractor",
   "version": "1.0.0",
-  "description": "First version of Telegram Groups and Contacts extractor",
+  "description": "Telegram Groups and Contacts extractor",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1659,30 +1702,30 @@ File: /package.json
   "engines": {
     "node": ">=14.0.0"
   },
-  "devDependencies": {
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.47",
-    "tailwindcss": "^3.4.13"
-  },
   "dependencies": {
-    "@radix-ui/react-checkbox": "^1.1.1",
+    "@radix-ui/react-checkbox": "^1.0.4",
     "@radix-ui/react-icons": "^1.3.0",
-    "@radix-ui/react-label": "^2.1.0",
-    "@radix-ui/react-radio-group": "^1.2.0",
-    "@radix-ui/react-slot": "^1.1.0",
-    "@radix-ui/react-tabs": "^1.1.1",
-    "@supabase/supabase-js": "^2.45.4",
+    "@radix-ui/react-label": "^2.0.2",
+    "@radix-ui/react-radio-group": "^1.1.3",
+    "@radix-ui/react-slot": "^1.0.2",
+    "@radix-ui/react-tabs": "^1.0.4",
+    "@supabase/supabase-js": "^2.39.0",
     "class-variance-authority": "^0.7.0",
-    "csv-stringify": "^6.5.1",
-    "date-fns": "^4.1.0",
-    "json2csv": "^5.0.7",
-    "lucide-react": "^0.446.0",
-    "next": "^14.2.13",
+    "csv-stringify": "^6.4.4",
+    "date-fns": "^2.30.0",
+    "json2csv": "^6.0.0-alpha.2",
+    "lucide-react": "^0.294.0",
+    "next": "^14.0.3",
     "prop-types": "^15.8.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
-    "telegram": "^2.25.15"
+    "telegram": "^2.19.10"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.5"
   }
 }
 

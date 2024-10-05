@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
+import input from 'input'; // Add this import
 import { Api } from 'telegram/tl';
 import { errors } from 'telegram';
 import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
@@ -31,9 +32,9 @@ export async function POST(req) {
     const validPhoneNumber = phoneNumber.trim();
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
-    checkRateLimit(); // Check if we're within rate limits
+    checkRateLimit();
 
-    const stringSession = new StringSession('');
+    const stringSession = new StringSession(''); // You can save the string session to avoid logging in again
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -41,78 +42,55 @@ export async function POST(req) {
     console.log('[PROCESS]: Connecting to Telegram');
     await client.connect();
 
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
+
     if (!validationCode) {
       console.log('[PROCESS]: Requesting validation code');
       try {
-        const { phoneCodeHash: newPhoneCodeHash } = await client.sendCode({
-          apiId: parseInt(apiId),
-          apiHash,
-          phone: validPhoneNumber,
-        });
-
+        const result = await client.sendCode(
+          {
+            apiId: parseInt(apiId),
+            apiHash: apiHash,
+          },
+          validPhoneNumber
+        );
         console.log('[SUCCESS]: Validation code requested successfully');
         return NextResponse.json({
           success: true,
           message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
-          phoneCodeHash: newPhoneCodeHash,
+          phoneCodeHash: result.phoneCodeHash,
         });
       } catch (error) {
+        console.error('[SEND CODE ERROR]:', error);
         return handleTelegramError(error);
       }
     }
 
-    console.log('[PROCESS]: Starting Telegram client session');
+    console.log('[PROCESS]: Starting sign-in');
     try {
       await client.start({
         phoneNumber: async () => validPhoneNumber,
-        password: async () => '',
+        password: async () => await input.text('Please enter your password: '),
         phoneCode: async () => validationCode,
-        onError: (err) => {
-          console.error('[TELEGRAM CLIENT ERROR]:', err);
-          throw err;
-        },
-      });
-
-      console.log('[SUCCESS]: Telegram client session started successfully');
-
-      let extractedData = [];
-      if (extractType === 'groups') {
-        const dialogs = await client.getDialogs();
-        extractedData = dialogs.map(dialog => ({
-          id: dialog.id.toString(),
-          name: dialog.title,
-          memberCount: dialog.participantsCount || 0,
-          type: dialog.isChannel ? 'channel' : 'group',
-          isPublic: !!dialog.username,
-        }));
-      } else if (extractType === 'contacts') {
-        const contacts = await client.getContacts();
-        extractedData = contacts.map(contact => ({
-          id: contact.id.toString(),
-          name: `${contact.firstName} ${contact.lastName}`.trim(),
-          username: contact.username,
-          phoneNumber: contact.phone,
-          isMutualContact: contact.mutualContact,
-        }));
-      }
-
-      console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
-
-      return NextResponse.json({
-        success: true,
-        items: extractedData,
-        sessionString: client.session.save(),
-        sessionExpiresIn: '7 days',
+        onError: (err) => console.log(err),
       });
     } catch (error) {
+      console.error('[SIGN IN ERROR]:', error);
       return handleTelegramError(error);
     }
+
+    console.log('[SUCCESS]: Signed in successfully');
+
+    // Rest of your code for extracting data...
+
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
   } finally {
-    if (client) {
+    if (client && client.connected) {
       try {
         await client.disconnect();
         console.log('[CLEANUP]: Telegram client disconnected successfully');

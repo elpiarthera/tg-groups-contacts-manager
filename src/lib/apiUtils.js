@@ -25,19 +25,7 @@ export function checkRateLimit() {
 export async function handleTelegramError(error) {
   console.error('Telegram API error:', error);
 
-  if (error.message.includes('FLOOD_WAIT')) {
-    const seconds = parseInt(error.message.split('_')[2]);
-    console.warn(`Rate limit hit! Waiting for ${seconds} seconds...`);
-    await new Promise(resolve => setTimeout(resolve, seconds * 1000));
-    return NextResponse.json({
-      success: false,
-      error: {
-        code: 429,
-        message: `Rate limit exceeded. Please try again after ${seconds} seconds.`
-      }
-    }, { status: 429 });
-  } 
-  else if (error.message.includes('PHONE_NUMBER_INVALID')) {
+  if (error.message.includes('PHONE_NUMBER_INVALID')) {
     return NextResponse.json({
       success: false,
       error: {
@@ -46,7 +34,7 @@ export async function handleTelegramError(error) {
       }
     }, { status: 400 });
   }
-  else if (error.message.includes('PHONE_CODE_INVALID')) {
+  if (error.message.includes('PHONE_CODE_INVALID')) {
     return NextResponse.json({
       success: false,
       error: {
@@ -55,7 +43,16 @@ export async function handleTelegramError(error) {
       }
     }, { status: 400 });
   }
-  else if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
+  if (error.message.includes('PHONE_CODE_EXPIRED')) {
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: 400,
+        message: 'Verification code has expired. Please request a new one.'
+      }
+    }, { status: 400 });
+  }
+  if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
     return NextResponse.json({
       success: false,
       error: {
