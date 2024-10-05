@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import input from 'input'; // Add this import
 import { Api } from 'telegram/tl';
-import { errors } from 'telegram';
 import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
 
 export async function POST(req) {
@@ -34,7 +32,7 @@ export async function POST(req) {
 
     checkRateLimit();
 
-    const stringSession = new StringSession(''); // You can save the string session to avoid logging in again
+    const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -67,25 +65,48 @@ export async function POST(req) {
         console.error('[SEND CODE ERROR]:', error);
         return handleTelegramError(error);
       }
+    } else {
+      console.log('[PROCESS]: Attempting to sign in with provided code');
+      try {
+        await client.invoke(new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        }));
+        console.log('[SUCCESS]: Signed in successfully');
+
+        // Perform data extraction here based on extractType
+        let extractedData = [];
+        if (extractType === 'groups') {
+          const dialogs = await client.getDialogs();
+          extractedData = dialogs.map(dialog => ({
+            id: dialog.id.toString(),
+            name: dialog.title,
+            memberCount: dialog.participantsCount || 0,
+            type: dialog.isChannel ? 'channel' : 'group',
+            isPublic: !!dialog.username,
+          }));
+        } else if (extractType === 'contacts') {
+          const contacts = await client.getContacts();
+          extractedData = contacts.map(contact => ({
+            id: contact.id.toString(),
+            name: `${contact.firstName} ${contact.lastName}`.trim(),
+            username: contact.username,
+            phoneNumber: contact.phone,
+            isMutualContact: contact.mutualContact,
+          }));
+        }
+
+        return NextResponse.json({
+          success: true,
+          items: extractedData,
+          sessionString: client.session.save(),
+        });
+      } catch (error) {
+        console.error('[SIGN IN ERROR]:', error);
+        return handleTelegramError(error);
+      }
     }
-
-    console.log('[PROCESS]: Starting sign-in');
-    try {
-      await client.start({
-        phoneNumber: async () => validPhoneNumber,
-        password: async () => await input.text('Please enter your password: '),
-        phoneCode: async () => validationCode,
-        onError: (err) => console.log(err),
-      });
-    } catch (error) {
-      console.error('[SIGN IN ERROR]:', error);
-      return handleTelegramError(error);
-    }
-
-    console.log('[SUCCESS]: Signed in successfully');
-
-    // Rest of your code for extracting data...
-
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
