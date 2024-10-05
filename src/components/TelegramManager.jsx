@@ -25,42 +25,41 @@ export default function TelegramExtractor() {
   const [showResults, setShowResults] = useState(false);
   const [showValidationInput, setShowValidationInput] = useState(false);
   const [csvUrl, setCsvUrl] = useState(null);
-  const [validationCodeSent, setValidationCodeSent] = useState(false);
+  const [phoneCodeHash, setPhoneCodeHash] = useState('');
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('Please enter a valid API ID. It should be a positive number.');
+      return false;
+    }
+    const apiHashPattern = /^[a-f0-9]{32}$/;
+    if (!apiHash || !apiHashPattern.test(apiHash)) {
+      setError('Please enter a valid API Hash. It should be a 32-character hexadecimal string.');
+      return false;
+    }
+    const trimmedPhoneNumber = phoneNumber.trim();
+    if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
+      setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
+      return false;
+    }
+    return true;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
-    // Validate API ID
-    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      setError('Please enter a valid API ID. It should be a positive number.');
-      setIsLoading(false);
-      return;
-    }
-
-    // Validate API Hash
-    const apiHashPattern = /^[a-f0-9]{32}$/;
-    if (!apiHash || !apiHashPattern.test(apiHash)) {
-      setError('Please enter a valid API Hash. It should be a 32-character hexadecimal string.');
-      setIsLoading(false);
-      return;
-    }
-
-    // Validate phone number
-    const trimmedPhoneNumber = phoneNumber.trim();
-    if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
-      setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
+    if (!validateInputs()) {
       setIsLoading(false);
       return;
     }
 
     try {
-      console.log('[FRONTEND DEBUG]: Sending payload:', { apiId, apiHash, phoneNumber: trimmedPhoneNumber, extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber: trimmedPhoneNumber, extractType }),
+        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber: phoneNumber.trim(), extractType }),
       });
 
       const data = await response.json();
@@ -71,7 +70,7 @@ export default function TelegramExtractor() {
 
       if (data.requiresValidation) {
         setShowValidationInput(true);
-        setValidationCodeSent(true);
+        setPhoneCodeHash(data.phoneCodeHash);
       } else {
         setItems(data.items || []);
         setShowResults(true);
@@ -96,17 +95,23 @@ export default function TelegramExtractor() {
     }
 
     try {
-      console.log('[DEBUG]: Sending validation payload:', { apiId, apiHash, phoneNumber, validationCode, extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode, extractType }),
+        body: JSON.stringify({ 
+          apiId: parseInt(apiId), 
+          apiHash, 
+          phoneNumber: phoneNumber.trim(), 
+          validationCode, 
+          extractType,
+          phoneCodeHash 
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to validate code or fetch data');
+        throw new Error(data.error?.message || 'Failed to validate code or fetch data');
       }
 
       setItems(data.items || []);
@@ -144,7 +149,7 @@ export default function TelegramExtractor() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract data');
+        throw new Error(data.error?.message || 'Failed to extract data');
       }
 
       setCsvUrl(data.csvUrl);
@@ -194,7 +199,7 @@ export default function TelegramExtractor() {
               </AlertDescription>
             </Alert>
 
-            {!validationCodeSent ? (
+            {!showValidationInput ? (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="api-id">API ID</Label>
