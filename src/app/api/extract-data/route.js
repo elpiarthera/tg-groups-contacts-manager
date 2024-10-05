@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { Api } from 'telegram';
+import { Api, errors } from 'telegram';
+import { checkRateLimit, handleTelegramError } from '@/lib/apiUtils';
 
 export async function POST(req) {
   let client;
@@ -29,6 +30,8 @@ export async function POST(req) {
     const validPhoneNumber = phoneNumber.trim();
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
+    checkRateLimit(); // Check if we're within rate limits
+
     const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
@@ -43,7 +46,7 @@ export async function POST(req) {
         const { phoneCodeHash: newPhoneCodeHash } = await client.sendCode({
           apiId: parseInt(apiId),
           apiHash,
-          phoneNumber: validPhoneNumber,
+          phone: validPhoneNumber,
         });
 
         console.log('[SUCCESS]: Validation code requested successfully');
@@ -54,11 +57,7 @@ export async function POST(req) {
           phoneCodeHash: newPhoneCodeHash,
         });
       } catch (error) {
-        console.error('[REQUEST CODE ERROR]:', error);
-        if (error instanceof Api.errors.PhoneNumberInvalidError) {
-          return handleErrorResponse('Invalid phone number. Please check and try again.', 400, error);
-        }
-        return handleErrorResponse('Failed to send the validation code. Please try again.', 500, error);
+        return handleTelegramError(error);
       }
     }
 
@@ -106,11 +105,7 @@ export async function POST(req) {
         sessionExpiresIn: '7 days',
       });
     } catch (error) {
-      console.error('[VALIDATION ERROR]: Error starting client session:', error);
-      if (error instanceof Api.errors.PhoneCodeExpiredError) {
-        return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
-      }
-      return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+      return handleTelegramError(error);
     }
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
@@ -129,15 +124,18 @@ export async function POST(req) {
 
 function handleErrorResponse(message, status = 500, error = null) {
   console.error('[ERROR RESPONSE]:', message);
-  if (error && typeof error === 'object' && 'stack' in error) {
-    console.error('[ERROR STACK]:', error.stack);
+  if (error && typeof error === 'object') {
+    if ('stack' in error) {
+      console.error('[ERROR STACK]:', error.stack);
+    }
+    return NextResponse.json({
+      success: false,
+      error: {
+        code: status,
+        message,
+        details: error.toString(),
+      },
+    }, { status });
   }
-  return NextResponse.json({
-    success: false,
-    error: {
-      code: status,
-      message,
-      details: error ? error.toString() : undefined,
-    },
-  }, { status });
+  return NextResponse.json({ success: false, error: { code: status, message } }, { status });
 }
