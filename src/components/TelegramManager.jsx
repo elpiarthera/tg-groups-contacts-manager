@@ -56,13 +56,20 @@ export default function TelegramExtractor() {
     }
 
     try {
+      console.log('[DEBUG]: Submitting request with:', { apiId, apiHash, phoneNumber: phoneNumber.trim(), extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber: phoneNumber.trim(), extractType }),
+        body: JSON.stringify({ 
+          apiId: parseInt(apiId), 
+          apiHash, 
+          phoneNumber: phoneNumber.trim(), 
+          extractType 
+        }),
       });
 
       const data = await response.json();
+      console.log('[DEBUG]: Received response:', data);
 
       if (!response.ok) {
         throw new Error(data.error?.message || 'Failed to initiate extraction');
@@ -76,7 +83,7 @@ export default function TelegramExtractor() {
         setShowResults(true);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('[ERROR]: Submit failed:', error);
       setError(error.message);
     } finally {
       setIsLoading(false);
@@ -95,6 +102,7 @@ export default function TelegramExtractor() {
     }
 
     try {
+      console.log('[DEBUG]: Submitting validation code:', validationCode);
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -109,6 +117,7 @@ export default function TelegramExtractor() {
       });
 
       const data = await response.json();
+      console.log('[DEBUG]: Received validation response:', data);
 
       if (!response.ok) {
         throw new Error(data.error?.message || 'Failed to validate code or fetch data');
@@ -118,7 +127,7 @@ export default function TelegramExtractor() {
       setShowResults(true);
       setShowValidationInput(false);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('[ERROR]: Validation submit failed:', error);
       setError(error.message);
     } finally {
       setIsLoading(false);
