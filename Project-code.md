@@ -55,161 +55,185 @@ File: /src/app/api/extract-data/route.js
 ---
 
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import { PhoneNumberInvalidError, FloodWaitError, PhoneCodeExpiredError, PhoneCodeInvalidError } from 'telegram/errors';
+import { 
+  PhoneNumberInvalidError, 
+  FloodWaitError, 
+  PhoneCodeExpiredError, 
+  PhoneCodeInvalidError, 
+  ApiIdInvalidError,
+  errors
+} from 'telegram/errors';
 
-function handleErrorResponse(message, status = 500) {
-	return NextResponse.json({
-		success: false,
-		error: message,
-	}, { status });
+function handleErrorResponse(message, status = 500, error = null) {
+  console.error('[ERROR RESPONSE]:', message);
+  if (error instanceof Error) {
+    console.error('[ERROR STACK]:', error.stack);
+  }
+  return NextResponse.json({
+    success: false,
+    error: { 
+      code: status, 
+      message,
+      details: error ? error.toString() : undefined
+    },
+  }, { status });
 }
 
 async function retryAsync(fn, retries = 3) {
-	for (let i = 0; i < retries; i++) {
-		try {
-			return await fn();
-		} catch (err) {
-			if (i === retries - 1) throw err;
-			console.warn(`[RETRY]: Attempt ${i + 1} failed. Retrying...`);
-			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
-		}
-	}
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof FloodWaitError) {
+        console.warn(`[FLOOD WAIT]: Waiting for ${err.seconds} seconds.`);
+        await new Promise(resolve => setTimeout(resolve, err.seconds * 1000));
+      } else if (err instanceof PhoneNumberInvalidError) {
+        console.error('[PHONE NUMBER ERROR]:', err);
+        throw err; // Don't retry for invalid phone numbers
+      } else {
+        console.warn(`[RETRY]: Attempt ${i + 1} failed. Error:`, err);
+        if (i === retries - 1) throw err;
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
+      }
+    }
+  }
 }
 
 export async function POST(req) {
-	let client;
-	try {
-		console.log('[START]: Extracting data');
-		const { apiId, apiHash, phoneNumber, extractType, validationCode, existingSessionString } = await req.json();
+  let client;
+  try {
+    console.log('[START]: Extracting data');
+    const { apiId, apiHash, phoneNumber: rawPhoneNumber, extractType, validationCode, existingSessionString } = await req.json();
 
-		// Validate API ID
-		if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-			console.error('[VALIDATION ERROR]: Invalid API ID');
-			return handleErrorResponse('Invalid API ID. It should be a positive number.', 400);
-		}
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, 
+      apiHash, 
+      phoneNumber: rawPhoneNumber, 
+      extractType, 
+      validationCode: validationCode ? 'Provided' : 'Not provided', 
+      existingSessionString: existingSessionString ? 'Exists' : 'Not provided' 
+    });
 
-		// Validate API Hash
-		const apiHashPattern = /^[a-f0-9]{32}$/;
-		if (!apiHash || !apiHashPattern.test(apiHash)) {
-			console.error('[VALIDATION ERROR]: Invalid API Hash');
-			return handleErrorResponse('Invalid API Hash. It should be a 32-character hexadecimal string.', 400);
-		}
+    // Input validation
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+    }
+    if (!rawPhoneNumber || typeof rawPhoneNumber !== 'string' || rawPhoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+    }
 
-		// Validate phone number
-		const phoneNumberPattern = /^\+\d{10,15}$/;
-		if (!phoneNumber || !phoneNumberPattern.test(phoneNumber)) {
-			console.error('[VALIDATION ERROR]: Phone number is undefined or not in the correct format');
-			return handleErrorResponse('Invalid or missing phone number. Ensure it is in the format +1234567890.', 400);
-		}
+    const validPhoneNumber = rawPhoneNumber.trim();
+    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
-		// Validate extractType
-		if (extractType !== 'groups' && extractType !== 'contacts') {
-			console.error('[VALIDATION ERROR]: Invalid extract type');
-			return handleErrorResponse('Invalid extract type. Allowed values are "groups" or "contacts".', 400);
-		}
+    const stringSession = new StringSession(existingSessionString || '');
+    client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+    });
 
-		console.log(`[INFO]: Received request for ${extractType} extraction`);
-		console.log(`[INFO]: Phone number: ${phoneNumber}`);
-		console.log(`[INFO]: Validation code received: ${validationCode ? 'Yes' : 'No'}`);
+    console.log('[PROCESS]: Connecting to Telegram');
+    await client.connect();
 
-		// Use existing session string if provided, otherwise create a new one
-		const stringSession = new StringSession(existingSessionString || '');
-		client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-			connectionRetries: 5,
-		});
+    if (!validationCode) {
+      console.log('[PROCESS]: Requesting validation code');
+      try {
+        const { phoneCodeHash } = await client.sendCode({
+          apiId: parseInt(apiId),
+          apiHash,
+          phoneNumber: validPhoneNumber,
+        });
+        
+        console.log('[SUCCESS]: Validation code requested successfully');
+        return NextResponse.json({
+          success: true,
+          message: 'Validation code sent to your phone. Please provide it in the next step.',
+          requiresValidation: true,
+          phoneCodeHash,
+        });
+      } catch (error) {
+        console.error('[REQUEST CODE ERROR]:', error);
+        if (error instanceof PhoneNumberInvalidError || (error.message && error.message.includes('PHONE_NUMBER_INVALID'))) {
+          return handleErrorResponse('Invalid phone number format. Please use the international format (e.g., +1234567890).', 400, error);
+        }
+        if (error instanceof errors.CastError) {
+          return handleErrorResponse('Invalid input. Please check all fields and try again.', 400, error);
+        }
+        return handleErrorResponse('Failed to send the validation code. Please try again.', 500, error);
+      }
+    } else {
+      console.log('[PROCESS]: Starting Telegram client session');
+      try {
+        await client.start({
+          phoneNumber: async () => validPhoneNumber,
+          password: async () => '',
+          phoneCode: async () => validationCode,
+          onError: (err) => {
+            console.error('[TELEGRAM CLIENT ERROR]:', err);
+            throw err;
+          },
+        });
 
-		if (!validationCode) {
-			console.log('[PROCESS]: Requesting validation code');
-			await retryAsync(async () => {
-				await client.connect();
-				const { phoneCodeHash } = await client.sendCode({
-					apiId: parseInt(apiId),
-					apiHash,
-					phoneNumber,
-				});
-				console.log('[SUCCESS]: Validation code requested successfully');
-				return NextResponse.json({
-					success: true,
-					message: 'Validation code sent to your phone. Please provide it in the next step.',
-					requiresValidation: true,
-					phoneCodeHash,
-				});
-			});
-		} else {
-			console.log('[PROCESS]: Starting Telegram client session');
-			try {
-				await retryAsync(async () => {
-					await client.start({
-						phoneNumber: async () => phoneNumber,
-						password: async () => '',
-						phoneCode: async () => validationCode,
-						onError: (err) => {
-							console.error('[TELEGRAM CLIENT ERROR]:', err);
-							throw err;
-						},
-					});
-				});
-				console.log('[SUCCESS]: Telegram client session started successfully');
+        console.log('[SUCCESS]: Telegram client session started successfully');
 
-				// Extract data based on extractType
-				let extractedData = [];
-				if (extractType === 'groups') {
-					const dialogs = await client.getDialogs();
-					extractedData = dialogs.map(dialog => ({
-						id: dialog.id.toString(),
-						name: dialog.title,
-						memberCount: dialog.participantsCount || 0,
-						type: dialog.isChannel ? 'channel' : 'group',
-						isPublic: !!dialog.username,
-					}));
-				} else if (extractType === 'contacts') {
-					const contacts = await client.getContacts();
-					extractedData = contacts.map(contact => ({
-						id: contact.id.toString(),
-						name: `${contact.firstName} ${contact.lastName}`.trim(),
-						username: contact.username,
-						phoneNumber: contact.phone,
-						isMutualContact: contact.mutualContact,
-					}));
-				}
+        // Extract data based on extractType
+        let extractedData = [];
+        if (extractType === 'groups') {
+          const dialogs = await client.getDialogs();
+          extractedData = dialogs.map(dialog => ({
+            id: dialog.id.toString(),
+            name: dialog.title,
+            memberCount: dialog.participantsCount || 0,
+            type: dialog.isChannel ? 'channel' : 'group',
+            isPublic: !!dialog.username,
+          }));
+        } else if (extractType === 'contacts') {
+          const contacts = await client.getContacts();
+          extractedData = contacts.map(contact => ({
+            id: contact.id.toString(),
+            name: `${contact.firstName} ${contact.lastName}`.trim(),
+            username: contact.username,
+            phoneNumber: contact.phone,
+            isMutualContact: contact.mutualContact,
+          }));
+        }
 
-				console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
+        console.log(`[SUCCESS]: Extracted ${extractedData.length} ${extractType}`);
 
-				return NextResponse.json({
-					success: true,
-					items: extractedData,
-					sessionString: client.session.save(), // Save the session string for future use
-					sessionExpiresIn: '7 days', // Assuming a 7-day session validity
-				});
-			} catch (error) {
-				console.error('[TELEGRAM SESSION ERROR]: Error starting Telegram client:', error);
-				if (error instanceof PhoneCodeExpiredError) {
-					return handleErrorResponse('The verification code has expired. Please request a new code.', 400);
-				} else if (error instanceof PhoneCodeInvalidError) {
-					return handleErrorResponse('The verification code is incorrect. Please try again.', 400);
-				} else if (error instanceof FloodWaitError) {
-					console.warn(`[FLOOD WAIT]: Waiting for ${error.seconds} seconds.`);
-					return handleErrorResponse(`Rate limit reached. Please try again in ${error.seconds} seconds.`, 429);
-				}
-				return handleErrorResponse('An unexpected error occurred while starting the Telegram client. Please try again later.');
-			}
-		}
-	} catch (error) {
-		console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
-		return handleErrorResponse('An unexpected error occurred. Please try again later.');
-	} finally {
-		if (client) {
-			try {
-				await client.disconnect();
-				console.log('[CLEANUP]: Telegram client disconnected successfully');
-			} catch (disconnectError) {
-				console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
-			}
-		}
-	}
+        return NextResponse.json({
+          success: true,
+          items: extractedData,
+          sessionString: client.session.save(),
+          sessionExpiresIn: '7 days',
+        });
+      } catch (error) {
+        console.error('[VALIDATION ERROR]: Error starting client session:', error);
+        if (error instanceof PhoneCodeExpiredError) {
+          return handleErrorResponse('The verification code has expired. Please request a new code.', 400, error);
+        } else if (error instanceof PhoneCodeInvalidError) {
+          return handleErrorResponse('The verification code is incorrect. Please try again.', 400, error);
+        } else if (error instanceof ApiIdInvalidError) {
+          return handleErrorResponse('The API ID or API Hash is invalid. Please check your credentials.', 400, error);
+        }
+        return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+      }
+    }
+  } catch (error) {
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  } finally {
+    if (client) {
+      try {
+        await client.disconnect();
+        console.log('[CLEANUP]: Telegram client disconnected successfully');
+      } catch (disconnectError) {
+        console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
+      }
+    }
+  }
 }
 
 
@@ -1138,35 +1162,65 @@ export default function TelegramExtractor() {
   const [showResults, setShowResults] = useState(false);
   const [showValidationInput, setShowValidationInput] = useState(false);
   const [csvUrl, setCsvUrl] = useState(null);
-  const [validationCodeSent, setValidationCodeSent] = useState(false);
+  const [phoneCodeHash, setPhoneCodeHash] = useState('');
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('Please enter a valid API ID. It should be a positive number.');
+      return false;
+    }
+    const apiHashPattern = /^[a-f0-9]{32}$/;
+    if (!apiHash || !apiHashPattern.test(apiHash)) {
+      setError('Please enter a valid API Hash. It should be a 32-character hexadecimal string.');
+      return false;
+    }
+    const trimmedPhoneNumber = phoneNumber.trim();
+    if (!trimmedPhoneNumber || !trimmedPhoneNumber.startsWith('+') || trimmedPhoneNumber.length < 10) {
+      setError('Please enter a valid phone number with the country code (e.g., +1234567890).');
+      return false;
+    }
+    return true;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
+    if (!validateInputs()) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
+      console.log('[DEBUG]: Submitting request with:', { apiId, apiHash, phoneNumber: phoneNumber.trim(), extractType });
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId: parseInt(apiId), apiHash, phoneNumber, extractType }),
+        body: JSON.stringify({ 
+          apiId: parseInt(apiId), 
+          apiHash, 
+          phoneNumber: phoneNumber.trim(), 
+          extractType 
+        }),
       });
 
       const data = await response.json();
+      console.log('[DEBUG]: Received response:', data);
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to initiate extraction');
+        throw new Error(data.error?.message || 'Failed to initiate extraction');
       }
 
       if (data.requiresValidation) {
         setShowValidationInput(true);
-        setValidationCodeSent(true);
+        setPhoneCodeHash(data.phoneCodeHash);
       } else {
         setItems(data.items || []);
         setShowResults(true);
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('[ERROR]: Submit failed:', error);
       setError(error.message);
     } finally {
       setIsLoading(false);
@@ -1178,24 +1232,39 @@ export default function TelegramExtractor() {
     setError(null);
     setIsLoading(true);
 
+    if (!validationCode) {
+      setError('Please enter the validation code.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
+      console.log('[DEBUG]: Submitting validation code:', validationCode);
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, phoneNumber, validationCode, extractType }),
+        body: JSON.stringify({ 
+          apiId: parseInt(apiId), 
+          apiHash, 
+          phoneNumber: phoneNumber.trim(), 
+          validationCode, 
+          extractType,
+          phoneCodeHash 
+        }),
       });
 
       const data = await response.json();
+      console.log('[DEBUG]: Received validation response:', data);
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to validate code or fetch data');
+        throw new Error(data.error?.message || 'Failed to validate code or fetch data');
       }
 
       setItems(data.items || []);
       setShowResults(true);
       setShowValidationInput(false);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('[ERROR]: Validation submit failed:', error);
       setError(error.message);
     } finally {
       setIsLoading(false);
@@ -1226,7 +1295,7 @@ export default function TelegramExtractor() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract data');
+        throw new Error(data.error?.message || 'Failed to extract data');
       }
 
       setCsvUrl(data.csvUrl);
@@ -1276,7 +1345,7 @@ export default function TelegramExtractor() {
               </AlertDescription>
             </Alert>
 
-            {!validationCodeSent ? (
+            {!showValidationInput ? (
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="api-id">API ID</Label>
@@ -1305,7 +1374,7 @@ export default function TelegramExtractor() {
                   <Input
                     id="phone-number"
                     value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    onChange={(e) => setPhoneNumber(e.target.value.trim())}
                     required
                     disabled={isLoading}
                     placeholder="Enter your phone number (with country code)"
