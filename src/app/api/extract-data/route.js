@@ -26,7 +26,7 @@ async function retryAsync(fn, retries = 3) {
 			console.warn(`[RETRY]: Attempt ${i + 1} failed. Error: ${err.message}`);
 			if (err.message.includes('phone number is undefined')) {
 				console.warn('[RETRY ERROR]: Cannot retry as phoneNumber is undefined.');
-				throw err;
+				throw err; // Throw immediately if phone number is undefined
 			}
 			await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Exponential backoff
 		}
@@ -47,7 +47,8 @@ export async function POST(req) {
 			console.error('[VALIDATION ERROR]: Phone number is missing, undefined, or not a valid string');
 			return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
 		}
-		console.log('[DEBUG]: Valid phone number:', phoneNumber);
+		const trimmedPhoneNumber = phoneNumber.trim();
+		console.log('[DEBUG]: Valid phone number:', trimmedPhoneNumber);
 
 		// Validate API ID
 		if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -69,7 +70,7 @@ export async function POST(req) {
 		}
 
 		console.log(`[INFO]: Received request for ${extractType} extraction`);
-		console.log(`[INFO]: Phone number: ${phoneNumber}`);
+		console.log(`[INFO]: Phone number: ${trimmedPhoneNumber}`);
 		console.log(`[INFO]: Validation code received: ${validationCode ? 'Yes' : 'No'}`);
 
 		// Use existing session string if provided, otherwise create a new one
@@ -78,7 +79,7 @@ export async function POST(req) {
 			connectionRetries: 5,
 		});
 
-		if (client.isConnected && client.session.userPhone !== phoneNumber) {
+		if (client.isConnected && client.session.userPhone !== trimmedPhoneNumber) {
 			console.warn('[INFO]: Disconnecting from old session to create a new one.');
 			await client.disconnect();
 		}
@@ -86,12 +87,14 @@ export async function POST(req) {
 		if (!validationCode) {
 			console.log('[PROCESS]: Requesting validation code');
 			await retryAsync(async () => {
+				if (!trimmedPhoneNumber) throw new Error('Phone number is undefined. Cannot proceed.');
 				await client.connect();
 				const { phoneCodeHash } = await client.sendCode({
 					apiId: parseInt(apiId),
 					apiHash,
-					phoneNumber,
+					phoneNumber: trimmedPhoneNumber,
 				});
+				console.log('[DEBUG]: Code sent successfully. Phone number used:', trimmedPhoneNumber);
 				console.log('[SUCCESS]: Validation code requested successfully');
 				return NextResponse.json({
 					success: true,
@@ -105,7 +108,7 @@ export async function POST(req) {
 			try {
 				await retryAsync(async () => {
 					await client.start({
-						phoneNumber: async () => phoneNumber,
+						phoneNumber: async () => trimmedPhoneNumber,
 						password: async () => '',
 						phoneCode: async () => validationCode,
 						onError: (err) => {
@@ -114,6 +117,7 @@ export async function POST(req) {
 						},
 					});
 				});
+				console.log('[DEBUG]: Client started successfully. Phone number used:', trimmedPhoneNumber);
 				console.log('[SUCCESS]: Telegram client session started successfully');
 
 				// Extract data based on extractType
