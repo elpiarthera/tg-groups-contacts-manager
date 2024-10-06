@@ -25,13 +25,13 @@ export async function POST(req) {
 
     // Input Validation
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+      return handleErrorResponse('API ID is invalid or missing.', 400);
     }
     if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
-      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+      return handleErrorResponse('API Hash is invalid.', 400);
     }
     if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
-      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+      return handleErrorResponse('Phone number is missing or invalid.', 400);
     }
 
     const validPhoneNumber = phoneNumber.trim();
@@ -51,11 +51,42 @@ export async function POST(req) {
     await client.connect();
     console.log('[DEBUG]: Connected to Telegram');
 
-    // Store the session string for potential reuse
     const sessionString = client.session.save();
     console.log('[DEBUG]: Session string saved');
 
-    // Fetch user data from Supabase
+    if (!validationCode) {
+      console.log('[DEBUG]: Requesting phone code...');
+      const result = await client.sendCode({
+        apiId: parseInt(apiId),
+        apiHash: apiHash,
+        phoneNumber: validPhoneNumber,
+      });
+      console.log('[DEBUG]: Phone code requested');
+
+      // Store the phone code hash in Supabase
+      const { error } = await supabase
+        .from('users')
+        .upsert({ 
+          phone_number: validPhoneNumber,
+          phoneCodeHash: result.phoneCodeHash,
+          code_request_time: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('[ERROR]: Error storing phone code hash:', error);
+        return handleErrorResponse('Error storing phone code hash', 500);
+      }
+
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Validation code sent. Please check your Telegram app.',
+        requiresValidation: true
+      });
+    }
+
+    // Validation code provided, proceed with sign in
+    console.log('[DEBUG]: Proceeding with code validation');
+
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
@@ -69,32 +100,10 @@ export async function POST(req) {
 
     console.log('[DEBUG]: Retrieved user data:', userData);
 
-    const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
+    const { phoneCodeHash } = userData;
 
-    if (!phoneCodeHash || !codeRequestTime) {
-      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
-    }
-
-    // Check if the code has expired
-    const codeRequestDate = new Date(codeRequestTime);
-    const currentTime = new Date();
-    console.log('[DEBUG] Code request time:', codeRequestDate);
-    console.log('[DEBUG] Current time:', currentTime);
-    console.log('[DEBUG] Time difference (ms):', currentTime - codeRequestDate);
-
-    const timeDifference = currentTime - codeRequestDate;
-    if (timeDifference > 120000) { // 2 minutes
-      return NextResponse.json({
-        success: false,
-        message: 'The verification code has expired. Please request a new code.',
-        code: 'PHONE_CODE_EXPIRED'
-      });
-    }
-
-    // Proceed with code validation
-    console.log('[DEBUG]: Proceeding with code validation');
-    if (!validationCode) {
-      return handleErrorResponse('Validation code is missing', 400);
+    if (!phoneCodeHash) {
+      return handleErrorResponse('Phone code hash not found. Please request a new code.', 400);
     }
 
     try {
@@ -138,13 +147,11 @@ export async function POST(req) {
 }
 
 async function extractGroups(client) {
-  // Implementation for extracting groups
   console.log('[DEBUG]: Extracting groups');
-  return []; // Placeholder
+  return []; // Placeholder implementation
 }
 
 async function extractContacts(client) {
-  // Implementation for extracting contacts
   console.log('[DEBUG]: Extracting contacts');
-  return []; // Placeholder
+  return []; // Placeholder implementation
 }

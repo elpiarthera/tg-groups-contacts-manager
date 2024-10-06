@@ -94,14 +94,13 @@ export default function TelegramManager() {
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {
-        setIsAuthenticated(true)
-        setShowValidationInput(false)
-        if (data.data) {
-          alert(`Extracted ${data.data.length} ${extractType}`)
-          // Here you might want to save the data or redirect to a results page
-          router.push(`/${extractType}-list`)
-        } else {
+        if (showValidationInput) {
+          setIsAuthenticated(true)
+          setShowValidationInput(false)
           alert('Authentication successful. You can now extract data.')
+        } else if (data.data) {
+          alert(`Extracted ${data.data.length} ${extractType}`)
+          router.push(`/${extractType}-list`)
         }
       } else {
         setError('An unexpected error occurred. Please try again.')
