@@ -13,6 +13,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 let client;
 
 export async function POST(req) {
+  let extractedData = [];
   try {
     console.log('[START]: Handling API Request');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
@@ -90,16 +91,35 @@ export async function POST(req) {
       });
     }
 
-    // Proceed with code validation and data extraction
-    // ... (rest of the code for validation and extraction)
+    // Proceed with code validation
+    console.log('[DEBUG]: Proceeding with code validation');
+    if (!validationCode) {
+      return handleErrorResponse('Validation code is missing', 400);
+    }
 
-    let extractedData = [];
+    try {
+      await client.invoke(
+        new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        })
+      );
+      console.log('[DEBUG]: Sign in successful');
+    } catch (error) {
+      console.error('[ERROR]: Sign in failed:', error);
+      return handleErrorResponse('Sign in failed', 400, error);
+    }
+
+    // Proceed with data extraction
+    console.log('[DEBUG]: Proceeding with data extraction');
     if (extractType === 'groups') {
       extractedData = await extractGroups(client);
     } else if (extractType === 'contacts') {
       extractedData = await extractContacts(client);
     }
 
+    console.log('[DEBUG]: Data extraction completed');
     return NextResponse.json({ success: true, data: extractedData });
 
   } catch (error) {
@@ -108,13 +128,8 @@ export async function POST(req) {
   } finally {
     if (client && client.connected) {
       try {
-        // Ensure all operations are completed before disconnecting
-        if (extractedData && extractedData.length > 0) {
-          await client.disconnect();
-          console.log('[CLEANUP]: Telegram client disconnected successfully');
-        } else {
-          console.log('[INFO]: Keeping client connected for further operations');
-        }
+        await client.disconnect();
+        console.log('[CLEANUP]: Telegram client disconnected successfully');
       } catch (disconnectError) {
         console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
       }
@@ -122,11 +137,14 @@ export async function POST(req) {
   }
 }
 
-// Helper functions for extracting groups and contacts
 async function extractGroups(client) {
   // Implementation for extracting groups
+  console.log('[DEBUG]: Extracting groups');
+  return []; // Placeholder
 }
 
 async function extractContacts(client) {
   // Implementation for extracting contacts
+  console.log('[DEBUG]: Extracting contacts');
+  return []; // Placeholder
 }
