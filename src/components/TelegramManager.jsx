@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
@@ -14,23 +14,8 @@ export default function TelegramManager() {
   const [apiHash, setApiHash] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [extractType, setExtractType] = useState('groups')
-  const [validationCode, setValidationCode] = useState('')
-  const [showValidationInput, setShowValidationInput] = useState(false)
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
-  const [codeRequestTime, setCodeRequestTime] = useState(null)
-
-  useEffect(() => {
-    if (showValidationInput && codeRequestTime) {
-      const timer = setTimeout(() => {
-        setError('Code expired. Please request a new one.')
-        setShowValidationInput(false)
-        setValidationCode('')
-        setCodeRequestTime(null)
-      }, 120000) // 2 minutes expiration
-      return () => clearTimeout(timer)
-    }
-  }, [showValidationInput, codeRequestTime])
 
   const validateInputs = () => {
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -64,17 +49,15 @@ export default function TelegramManager() {
         apiHash,
         phoneNumber: phoneNumber.trim(),
         extractType,
-        validationCode: showValidationInput ? validationCode : undefined,
       }
 
       console.log('[DEBUG]: Submitting request with:', {
         ...payload,
         apiHash: '******',
         phoneNumber: '*******' + payload.phoneNumber.slice(-4),
-        validationCode: payload.validationCode ? '******' : undefined,
       })
 
-      const response = await fetch('/api/extract-data', {
+      const response = await fetch('/api/telegram-extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -84,26 +67,22 @@ export default function TelegramManager() {
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to initiate extraction')
+        throw new Error(data.error || 'Failed to process request')
       }
 
-      if (data.code === 'PHONE_CODE_EXPIRED') {
-        setError('The verification code has expired. Please request a new code.')
-        setShowValidationInput(false)
-        setValidationCode('')
-        setCodeRequestTime(null)
-      } else if (data.requiresValidation) {
-        setShowValidationInput(true)
-        setCodeRequestTime(new Date())
-        setError(null)
-        alert('Please enter the validation code sent to your Telegram app.')
-      } else if (data.success) {
-        router.push(`/${extractType}-list`)
+      if (data.success) {
+        if (data.data) {
+          alert(`Extracted ${data.data.length} ${extractType}`)
+          // Here you might want to save the data or redirect to a results page
+          router.push(`/${extractType}-list`)
+        } else {
+          alert('Extraction completed successfully.')
+        }
       } else {
         setError('An unexpected error occurred. Please try again.')
       }
     } catch (error) {
-      console.error('[ERROR]: Submit failed:', error)
+      console.error('[ERROR]: Extract failed:', error)
       setError(error.message)
     } finally {
       setIsLoading(false)
@@ -126,7 +105,7 @@ export default function TelegramManager() {
                 value={apiId}
                 onChange={(e) => setApiId(e.target.value)}
                 required
-                disabled={isLoading || showValidationInput}
+                disabled={isLoading}
                 placeholder="Enter your API ID"
               />
             </div>
@@ -137,7 +116,7 @@ export default function TelegramManager() {
                 value={apiHash}
                 onChange={(e) => setApiHash(e.target.value)}
                 required
-                disabled={isLoading || showValidationInput}
+                disabled={isLoading}
                 placeholder="Enter your API Hash"
               />
             </div>
@@ -148,35 +127,22 @@ export default function TelegramManager() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 required
-                disabled={isLoading || showValidationInput}
+                disabled={isLoading}
                 placeholder="Enter your phone number (with country code)"
               />
             </div>
             <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="groups" id="groups" disabled={isLoading || showValidationInput} />
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
                 <Label htmlFor="groups">Extract Groups</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || showValidationInput} />
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
                 <Label htmlFor="contacts">Extract Contacts</Label>
               </div>
             </RadioGroup>
-            {showValidationInput && (
-              <div className="space-y-2">
-                <Label htmlFor="validation-code">Validation Code</Label>
-                <Input
-                  id="validation-code"
-                  value={validationCode}
-                  onChange={(e) => setValidationCode(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  placeholder="Enter the code sent to your Telegram app"
-                />
-              </div>
-            )}
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (showValidationInput ? 'Verify Code' : 'Request Code')}
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Extract Data'}
             </Button>
           </form>
           {error && (

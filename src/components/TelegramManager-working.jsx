@@ -60,22 +60,12 @@ export default function TelegramManager() {
     }
 
     try {
-      let action;
-      if (!showValidationInput) {
-        action = 'authenticate';
-      } else if (!isAuthenticated) {
-        action = 'verify';
-      } else {
-        action = 'extract';
-      }
-
       const payload = {
         apiId: parseInt(apiId),
         apiHash,
         phoneNumber: phoneNumber.trim(),
         extractType,
         validationCode: showValidationInput ? validationCode : undefined,
-        action,
       }
 
       console.log('[DEBUG]: Submitting request with:', {
@@ -85,7 +75,7 @@ export default function TelegramManager() {
         validationCode: payload.validationCode ? '******' : undefined,
       })
 
-      const response = await fetch('/api/extract-data', {
+      const response = await fetch('/api/telegram-extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -95,28 +85,23 @@ export default function TelegramManager() {
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to process request')
+        throw new Error(data.error || 'Failed to process request')
       }
 
-      if (data.code === 'PHONE_CODE_EXPIRED') {
-        setError('The verification code has expired. Please request a new code.')
-        setShowValidationInput(false)
-        setValidationCode('')
-        setCodeRequestTime(null)
-        setIsAuthenticated(false)
-      } else if (data.requiresValidation) {
+      if (data.requiresValidation) {
         setShowValidationInput(true)
         setCodeRequestTime(new Date())
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {
-        if (action === 'verify') {
-          setIsAuthenticated(true)
-          setShowValidationInput(false)
-          alert('Authentication successful. You can now extract data.')
-        } else if (action === 'extract') {
+        setIsAuthenticated(true)
+        setShowValidationInput(false)
+        if (data.data) {
           alert(`Extracted ${data.data.length} ${extractType}`)
+          // Here you might want to save the data or redirect to a results page
           router.push(`/${extractType}-list`)
+        } else {
+          alert('Authentication successful. You can now extract data.')
         }
       } else {
         setError('An unexpected error occurred. Please try again.')
