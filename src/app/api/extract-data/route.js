@@ -10,6 +10,13 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Telegram server configuration
+const serverConfig = {
+  ip_address: '149.154.167.50', // Production server
+  port: 443,
+  dc_id: 2
+};
+
 export async function POST(req) {
   let client;
   try {
@@ -42,14 +49,21 @@ export async function POST(req) {
       connectionRetries: 5,
       useWSS: true,
       timeout: 30000,
+      connection: serverConfig
     });
 
-    console.log('[PROCESS]: Connecting to Telegram');
-    await client.connect();
+    console.log(`[PROCESS]: Connecting to Telegram server: ${serverConfig.ip_address}:${serverConfig.port}`);
+    try {
+      await client.connect();
+    } catch (connectionError) {
+      console.error('[CONNECTION ERROR]:', connectionError);
+      return handleErrorResponse('Failed to connect to Telegram server. Please try again later.', 500);
+    }
 
     if (!client.connected) {
       throw new Error('Failed to connect to Telegram');
     }
+    console.log('[SUCCESS]: Connected to Telegram server');
 
     // Check if user exists, if not create a new user in Supabase
     let { data: user, error: userError } = await supabase
@@ -234,5 +248,4 @@ export async function POST(req) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
   }
-  // Note: We've removed the client disconnect logic as requested
 }
