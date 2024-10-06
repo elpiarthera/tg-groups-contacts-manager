@@ -90,11 +90,11 @@ export async function POST(req) {
         );
         console.log('[SUCCESS]: Validation code requested successfully');
         
-        // Store phone_code_hash in Supabase
+        // Store phoneCodeHash in Supabase
         const { error: updateError } = await supabase
           .from('users')
           .update({ 
-            phone_code_hash: result.phoneCodeHash, 
+            phoneCodeHash: result.phoneCodeHash, 
             code_request_time: new Date().toISOString() 
           })
           .eq('id', user.id);
@@ -104,7 +104,7 @@ export async function POST(req) {
           throw updateError;
         }
 
-        console.log('[DEBUG]: Updated user with phone_code_hash and code_request_time');
+        console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
 
         return NextResponse.json({
           success: true,
@@ -117,10 +117,10 @@ export async function POST(req) {
       }
     }
 
-    // Retrieve phone_code_hash from Supabase
+    // Retrieve phoneCodeHash from Supabase
     const { data: userData, error: fetchError } = await supabase
       .from('users')
-      .select('phone_code_hash, code_request_time')
+      .select('phoneCodeHash, code_request_time')
       .eq('id', user.id)
       .single();
 
@@ -131,7 +131,7 @@ export async function POST(req) {
 
     console.log('[DEBUG]: Retrieved user data:', userData);
 
-    const { phone_code_hash: phoneCodeHash, code_request_time: codeRequestTime } = userData;
+    const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
 
     if (!phoneCodeHash || !codeRequestTime) {
       return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
@@ -203,10 +203,10 @@ export async function POST(req) {
         throw insertError;
       }
 
-      // Clear the phone_code_hash after successful sign-in
+      // Clear the phoneCodeHash after successful sign-in
       const { error: clearError } = await supabase
         .from('users')
-        .update({ phone_code_hash: null, code_request_time: null })
+        .update({ phoneCodeHash: null, code_request_time: null })
         .eq('id', user.id);
 
       if (clearError) {

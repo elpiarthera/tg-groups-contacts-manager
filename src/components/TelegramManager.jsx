@@ -16,7 +16,6 @@ export default function TelegramManager() {
   const [extractType, setExtractType] = useState('groups')
   const [validationCode, setValidationCode] = useState('')
   const [showValidationInput, setShowValidationInput] = useState(false)
-  const [phoneCodeHash, setPhoneCodeHash] = useState('')
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [codeRequestTime, setCodeRequestTime] = useState(null)
@@ -27,7 +26,6 @@ export default function TelegramManager() {
         setError('Code expired. Please request a new one.')
         setShowValidationInput(false)
         setValidationCode('')
-        setPhoneCodeHash('')
         setCodeRequestTime(null)
       }, 120000) // 2 minutes expiration
       return () => clearTimeout(timer)
@@ -93,11 +91,9 @@ export default function TelegramManager() {
         setError('The verification code has expired. Please request a new code.')
         setShowValidationInput(false)
         setValidationCode('')
-        setPhoneCodeHash('')
         setCodeRequestTime(null)
       } else if (data.requiresValidation) {
         setShowValidationInput(true)
-        setPhoneCodeHash(data.phoneCodeHash)
         setCodeRequestTime(new Date())
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
