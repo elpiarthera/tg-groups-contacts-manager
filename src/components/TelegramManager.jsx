@@ -75,7 +75,7 @@ export default function TelegramManager() {
         validationCode: payload.validationCode ? '******' : undefined,
       })
 
-      const response = await fetch('/api/telegram-extract', {
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
