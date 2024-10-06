@@ -65,6 +65,33 @@ export async function POST(req) {
     }
 
     if (action === 'authenticate') {
+      // Check if a valid session exists
+      if (user.session_string) {
+        try {
+          const stringSession = new StringSession(user.session_string);
+          client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+            connectionRetries: 5,
+            useWSS: true,
+            timeout: 30000,
+          });
+
+          await client.connect();
+          console.log('[SUCCESS]: Reused existing session');
+          return NextResponse.json({
+            success: true,
+            message: 'Authentication successful using existing session',
+          });
+        } catch (error) {
+          console.error('[SESSION REUSE ERROR]:', error);
+          // If session is invalid, clear it and proceed with new authentication
+          await supabase
+            .from('users')
+            .update({ session_string: null })
+            .eq('id', user.id);
+        }
+      }
+
+      // Proceed with new authentication if no valid session exists
       const stringSession = new StringSession('');
       client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
         connectionRetries: 5,
@@ -193,7 +220,19 @@ export async function POST(req) {
         timeout: 30000,
       });
 
-      await client.connect();
+      try {
+        await client.connect();
+      } catch (error) {
+        if (error.message.includes('AUTH_KEY_UNREGISTERED')) {
+          // Session expired, clear it and ask for re-authentication
+          await supabase
+            .from('users')
+            .update({ session_string: null })
+            .eq('id', user.id);
+          return handleErrorResponse('Session expired. Please authenticate again.', 401);
+        }
+        throw error;
+      }
 
       // Perform data extraction based on extractType
       let extractedData = [];

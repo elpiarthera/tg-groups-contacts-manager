@@ -14,8 +14,10 @@ export default function TelegramManager() {
   const [apiHash, setApiHash] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [requiresValidation, setRequiresValidation] = useState(false)
 
   const validateInputs = () => {
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -33,8 +35,7 @@ export default function TelegramManager() {
     return true
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleAuthenticate = async () => {
     setError(null)
     setIsLoading(true)
 
@@ -48,44 +49,111 @@ export default function TelegramManager() {
         apiId: parseInt(apiId),
         apiHash,
         phoneNumber: phoneNumber.trim(),
-        extractType,
+        action: 'authenticate',
       }
 
-      console.log('[DEBUG]: Submitting request with:', {
-        ...payload,
-        apiHash: '******',
-        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
-      })
-
-      const response = await fetch('/api/telegram-extract', {
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
       const data = await response.json()
-      console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process request')
+        throw new Error(data.error || 'Failed to authenticate')
       }
 
-      if (data.success) {
-        if (data.data) {
-          alert(`Extracted ${data.data.length} ${extractType}`)
-          // Here you might want to save the data or redirect to a results page
-          router.push(`/${extractType}-list`)
-        } else {
-          alert('Extraction completed successfully.')
-        }
+      if (data.requiresValidation) {
+        setRequiresValidation(true)
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        // Authentication successful, proceed to extraction
+        handleExtract()
       }
     } catch (error) {
-      console.error('[ERROR]: Extract failed:', error)
+      console.error('[ERROR]: Authentication failed:', error)
       setError(error.message)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleVerify = async () => {
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        validationCode,
+        action: 'verify',
+      }
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to verify')
+      }
+
+      // Verification successful, proceed to extraction
+      handleExtract()
+    } catch (error) {
+      console.error('[ERROR]: Verification failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleExtract = async () => {
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        action: 'extract',
+      }
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract data')
+      }
+
+      alert(`Extracted ${data.data.length} ${extractType}`)
+      router.push(`/${extractType}-list`)
+    } catch (error) {
+      console.error('[ERROR]: Extraction failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (requiresValidation) {
+      handleVerify()
+    } else {
+      handleAuthenticate()
     }
   }
 
@@ -105,7 +173,7 @@ export default function TelegramManager() {
                 value={apiId}
                 onChange={(e) => setApiId(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your API ID"
               />
             </div>
@@ -116,7 +184,7 @@ export default function TelegramManager() {
                 value={apiHash}
                 onChange={(e) => setApiHash(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your API Hash"
               />
             </div>
@@ -127,10 +195,23 @@ export default function TelegramManager() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your phone number (with country code)"
               />
             </div>
+            {requiresValidation && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the validation code"
+                />
+              </div>
+            )}
             <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
@@ -142,7 +223,7 @@ export default function TelegramManager() {
               </div>
             </RadioGroup>
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Extract Data'}
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (requiresValidation ? 'Verify' : 'Authenticate')}
             </Button>
           </form>
           {error && (
