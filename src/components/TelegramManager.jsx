@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,19 @@ export default function TelegramManager() {
   const [phoneCodeHash, setPhoneCodeHash] = useState('')
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [codeRequestTime, setCodeRequestTime] = useState(null)
+
+  useEffect(() => {
+    if (showValidationInput && codeRequestTime) {
+      const timer = setTimeout(() => {
+        setError('Code expired. Please request a new one.')
+        setShowValidationInput(false)
+        setPhoneCodeHash('')
+        setCodeRequestTime(null)
+      }, 120000) // 2 minutes expiration
+      return () => clearTimeout(timer)
+    }
+  }, [showValidationInput, codeRequestTime])
 
   const validateInputs = () => {
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -54,9 +67,15 @@ export default function TelegramManager() {
         extractType,
         validationCode: showValidationInput ? validationCode : undefined,
         phoneCodeHash: showValidationInput ? phoneCodeHash : undefined,
+        codeRequestTime: codeRequestTime ? codeRequestTime.toISOString() : undefined,
       }
 
-      console.log('[DEBUG]: Submitting request with:', payload)
+      console.log('[DEBUG]: Submitting request with:', {
+        ...payload,
+        apiHash: '******',
+        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
+        validationCode: payload.validationCode ? '******' : undefined,
+      })
 
       const response = await fetch('/api/extract-data', {
         method: 'POST',
@@ -76,9 +95,11 @@ export default function TelegramManager() {
         setShowValidationInput(false)
         setValidationCode('')
         setPhoneCodeHash('')
+        setCodeRequestTime(null)
       } else if (data.requiresValidation) {
         setShowValidationInput(true)
         setPhoneCodeHash(data.phoneCodeHash)
+        setCodeRequestTime(new Date())
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {

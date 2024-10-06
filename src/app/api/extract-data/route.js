@@ -14,12 +14,13 @@ export async function POST(req) {
   let client;
   try {
     console.log('[START]: Handling API Request');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode, phoneCodeHash } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode, phoneCodeHash, codeRequestTime } = await req.json();
 
     console.log('[DEBUG]: Received payload:', { 
       apiId, apiHash, phoneNumber, extractType, 
       validationCode: validationCode ? 'Provided' : 'Not provided',
-      phoneCodeHash: phoneCodeHash ? 'Provided' : 'Not provided'
+      phoneCodeHash: phoneCodeHash ? 'Provided' : 'Not provided',
+      codeRequestTime: codeRequestTime || 'Not provided'
     });
 
     // Input Validation
@@ -41,6 +42,8 @@ export async function POST(req) {
     const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
     });
 
     console.log('[PROCESS]: Connecting to Telegram');
@@ -92,6 +95,20 @@ export async function POST(req) {
       } catch (error) {
         console.error('[SEND CODE ERROR]:', error);
         return handleTelegramError(error);
+      }
+    }
+
+    // Check if the code has expired
+    if (codeRequestTime) {
+      const codeRequestDate = new Date(codeRequestTime);
+      const currentTime = new Date();
+      const timeDifference = currentTime - codeRequestDate;
+      if (timeDifference > 120000) { // 2 minutes
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
       }
     }
 
