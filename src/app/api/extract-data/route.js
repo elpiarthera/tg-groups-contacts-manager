@@ -115,6 +115,10 @@ export async function POST(req) {
 
     const { phone_code_hash: phoneCodeHash, code_request_time: codeRequestTime } = userData;
 
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
     // Check if the code has expired
     const codeRequestDate = new Date(codeRequestTime);
     const currentTime = new Date();
@@ -165,6 +169,8 @@ export async function POST(req) {
           is_mutual_contact: contact.mutualContact,
           owner_id: user.id,
         }));
+      } else {
+        throw new Error('Invalid extract type specified');
       }
 
       // Insert extracted data into Supabase
