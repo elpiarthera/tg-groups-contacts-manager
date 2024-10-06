@@ -28,7 +28,7 @@ export default function TelegramManager() {
         setShowValidationInput(false)
         setValidationCode('')
         setCodeRequestTime(null)
-      }, 15 * 60 * 1000) // 15 minutes expiration, matching the server-side
+      }, 120000) // 2 minutes expiration
       return () => clearTimeout(timer)
     }
   }, [showValidationInput, codeRequestTime])
