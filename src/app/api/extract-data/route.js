@@ -143,6 +143,14 @@ export async function POST(req) {
         sessionString: client.session.save(),
       });
     } catch (error) {
+      if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+        console.error('[SIGN IN ERROR]: Phone code has expired');
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
+      }
       console.error('[SIGN IN ERROR]:', error);
       return handleTelegramError(error);
     }

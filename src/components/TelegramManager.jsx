@@ -37,7 +37,7 @@ export default function TelegramManager() {
   }
 
   const handleSubmit = async (e) => {
-        e.preventDefault()
+    e.preventDefault()
     setError(null)
     setIsLoading(true)
 
@@ -69,7 +69,11 @@ export default function TelegramManager() {
         throw new Error(data.error?.message || 'Failed to initiate extraction')
       }
 
-      if (data.requiresValidation) {
+      if (data.code === 'PHONE_CODE_EXPIRED') {
+        alert('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')  // Reset validation code
+      } else if (data.requiresValidation) {
         setShowValidationInput(true)
         setPhoneCodeHash(data.phoneCodeHash)
         setError(null)
