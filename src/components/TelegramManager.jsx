@@ -94,7 +94,49 @@ const TelegramManager = () => {
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Form fields remain the same */}
+          <div className="space-y-2">
+            <Label htmlFor="api-id">API ID</Label>
+            <Input
+              id="api-id"
+              value={apiId}
+              onChange={(e) => setApiId(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API ID"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="api-hash">API Hash</Label>
+            <Input
+              id="api-hash"
+              value={apiHash}
+              onChange={(e) => setApiHash(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your API Hash"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="phone-number">Phone Number</Label>
+            <Input
+              id="phone-number"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              required
+              disabled={isLoading}
+              placeholder="Enter your phone number (with country code)"
+            />
+          </div>
+          <RadioGroup value={extractType} onValueChange={setExtractType}>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+              <Label htmlFor="groups">Extract Groups</Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+              <Label htmlFor="contacts">Extract Contacts</Label>
+            </div>
+          </RadioGroup>
           {showValidationInput && (
             <div className="space-y-2">
               <Label htmlFor="validation-code">Validation Code</Label>

@@ -1,5 +1,6 @@
 import { FloodWaitError, errors } from 'telegram';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 const MAX_REQUESTS_PER_MINUTE = 20;
 const MAX_BACKOFF_TIME = 60000; // 1 minute
@@ -7,6 +8,11 @@ const MAX_BACKOFF_TIME = 60000; // 1 minute
 let requestCount = 0;
 let lastRequestTime = Date.now();
 let backoffTime = 2000; // Start with 2 seconds
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export function checkRateLimit() {
   const currentTime = Date.now();

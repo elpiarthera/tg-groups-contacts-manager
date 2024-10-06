@@ -1,12 +1,24 @@
 import React from 'react';
+import { supabase } from '@/lib/apiUtils';
 
-const GroupsListPage = () => {
+const GroupsList = async () => {
+  const { data: groups, error } = await supabase.from('groups').select('*');
+
+  if (error) {
+    console.error('Error fetching groups:', error);
+    return <div>Error loading groups</div>;
+  }
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Groups List</h1>
-      <p>This page will display the extracted groups.</p>
+    <div>
+      <h1>Groups List</h1>
+      <ul>
+        {groups.map((group) => (
+          <li key={group.id}>{group.name}</li>
+        ))}
+      </ul>
     </div>
   );
 };
 
-export default GroupsListPage;
+export default GroupsList;
