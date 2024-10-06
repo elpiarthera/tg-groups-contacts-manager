@@ -55,7 +55,9 @@ export default function TelegramManager() {
         validationCode: showValidationInput ? validationCode : undefined,
         phoneCodeHash: showValidationInput ? phoneCodeHash : undefined,
       }
+
       console.log('[DEBUG]: Submitting request with:', payload)
+
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,7 +77,7 @@ export default function TelegramManager() {
         setValidationCode('')  // Reset validation code
       } else if (data.requiresValidation) {
         setShowValidationInput(true)
-        setPhoneCodeHash(data.phoneCodeHash)
+        setPhoneCodeHash(data.phoneCodeHash)  // Store the phoneCodeHash
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {
@@ -107,7 +109,7 @@ export default function TelegramManager() {
                 value={apiId}
                 onChange={(e) => setApiId(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || showValidationInput}
                 placeholder="Enter your API ID"
               />
             </div>
@@ -118,7 +120,7 @@ export default function TelegramManager() {
                 value={apiHash}
                 onChange={(e) => setApiHash(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || showValidationInput}
                 placeholder="Enter your API Hash"
               />
             </div>
@@ -129,17 +131,17 @@ export default function TelegramManager() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || showValidationInput}
                 placeholder="Enter your phone number (with country code)"
               />
             </div>
             <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading || showValidationInput} />
                 <Label htmlFor="groups">Extract Groups</Label>
               </div>
               <div className="flex items-center space-x-2">
-                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || showValidationInput} />
                 <Label htmlFor="contacts">Extract Contacts</Label>
               </div>
             </RadioGroup>
