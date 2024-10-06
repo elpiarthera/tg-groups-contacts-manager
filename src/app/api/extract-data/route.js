@@ -28,12 +28,14 @@ export async function POST(req) {
     if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
       return handleErrorResponse('API Hash is invalid.', 400);
     }
-    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+    if (!phoneNumber || typeof phoneNumber !== 'string' || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
       return handleErrorResponse('Phone number is missing or invalid.', 400);
     }
 
     const validPhoneNumber = phoneNumber.trim();
+    const parsedApiId = parseInt(apiId, 10);
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
+    console.log('[DEBUG]: Parsed API ID:', parsedApiId);
 
     checkRateLimit();
 
@@ -50,7 +52,7 @@ export async function POST(req) {
         .from('users')
         .insert({ 
           phone_number: validPhoneNumber,
-          api_id: apiId,
+          api_id: parsedApiId,
           api_hash: apiHash
         })
         .select()
@@ -61,28 +63,16 @@ export async function POST(req) {
         return handleErrorResponse('Failed to create user', 500);
       }
       user = newUser;
-      console.log('[DEBUG]: New user created');
+      console.log('[DEBUG]: New user created:', user);
     } else if (userError) {
       console.error('[USER FETCH ERROR]:', userError);
       return handleErrorResponse('Error fetching user data', 500);
     } else {
-      // User exists, update API ID and Hash if they've changed
-      if (user.api_id !== apiId || user.api_hash !== apiHash) {
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ api_id: apiId, api_hash: apiHash })
-          .eq('id', user.id);
-
-        if (updateError) {
-          console.error('[USER UPDATE ERROR]:', updateError);
-          return handleErrorResponse('Failed to update user data', 500);
-        }
-        console.log('[DEBUG]: User API credentials updated');
-      }
+      console.log('[DEBUG]: Existing user found:', user);
     }
 
     const stringSession = new StringSession(user?.session_string || '');
-    client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+    client = new TelegramClient(stringSession, parsedApiId, apiHash, {
       connectionRetries: 5,
       useWSS: true,
       timeout: 30000,
@@ -100,7 +90,7 @@ export async function POST(req) {
         console.log('[DEBUG]: Requesting phone code...');
         try {
           const result = await client.sendCode({
-            apiId: parseInt(apiId),
+            apiId: parsedApiId,
             apiHash,
             phone: validPhoneNumber,
           });
