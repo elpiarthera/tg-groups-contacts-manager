@@ -36,8 +36,8 @@ export default function TelegramManager() {
     return true
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (e) => {
+        e.preventDefault()
     setError(null)
     setIsLoading(true)
 
