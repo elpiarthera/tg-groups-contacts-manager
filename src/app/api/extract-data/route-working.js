@@ -10,15 +10,14 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-let client;
-
 export async function POST(req) {
+  let client;
   try {
     console.log('[START]: Handling API Request');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
 
     console.log('[DEBUG]: Received payload:', { 
-      apiId, apiHash, phoneNumber, extractType, action,
+      apiId, apiHash, phoneNumber, extractType, 
       validationCode: validationCode ? 'Provided' : 'Not provided',
     });
 
@@ -37,6 +36,20 @@ export async function POST(req) {
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
     checkRateLimit();
+
+    const stringSession = new StringSession('');
+    client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+    });
+
+    console.log('[PROCESS]: Connecting to Telegram');
+    await client.connect();
+
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
 
     // Check if user exists, if not create a new user in Supabase
     let { data: user, error: userError } = await supabase
@@ -64,21 +77,8 @@ export async function POST(req) {
       throw userError;
     }
 
-    if (action === 'authenticate') {
-      const stringSession = new StringSession('');
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
-      });
-
-      console.log('[PROCESS]: Connecting to Telegram');
-      await client.connect();
-
-      if (!client.connected) {
-        throw new Error('Failed to connect to Telegram');
-      }
-
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
       console.log('[PROCESS]: Requesting validation code');
       try {
         const result = await client.sendCode(
@@ -115,85 +115,54 @@ export async function POST(req) {
         console.error('[SEND CODE ERROR]:', error);
         return handleTelegramError(error);
       }
-    } else if (action === 'verify') {
-      // Retrieve phoneCodeHash from Supabase
-      const { data: userData, error: fetchError } = await supabase
-        .from('users')
-        .select('phoneCodeHash, code_request_time')
-        .eq('id', user.id)
-        .single();
+    }
 
-      if (fetchError) {
-        console.error('[FETCH ERROR]:', fetchError);
-        throw fetchError;
-      }
+    // Retrieve phoneCodeHash from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('phoneCodeHash, code_request_time')
+      .eq('id', user.id)
+      .single();
 
-      console.log('[DEBUG]: Retrieved user data:', userData);
+    if (fetchError) {
+      console.error('[FETCH ERROR]:', fetchError);
+      throw fetchError;
+    }
 
-      const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
+    console.log('[DEBUG]: Retrieved user data:', userData);
 
-      if (!phoneCodeHash || !codeRequestTime) {
-        return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
-      }
+    const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
 
-      const stringSession = new StringSession('');
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime);
+    const currentTime = new Date();
+    const timeDifference = currentTime - codeRequestDate;
+    if (timeDifference > 120000) { // 2 minutes
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
       });
+    }
 
-      await client.connect();
+    // Step 2: Sign in with the provided validation code and extract data
+    console.log('[PROCESS]: Attempting to sign in with provided code');
+    try {
+      const signInResult = await client.invoke(new Api.auth.SignIn({
+        phoneNumber: validPhoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode
+      }));
 
-      console.log('[PROCESS]: Attempting to sign in with provided code');
-      try {
-        const signInResult = await client.invoke(new Api.auth.SignIn({
-          phoneNumber: validPhoneNumber,
-          phoneCodeHash: phoneCodeHash,
-          phoneCode: validationCode
-        }));
-
-        if (!signInResult.user) {
-          throw new Error('Failed to sign in. Please check your validation code and try again.');
-        }
-
-        console.log('[SUCCESS]: Signed in successfully');
-
-        // Save the session string
-        const sessionString = client.session.save();
-        await supabase
-          .from('users')
-          .update({ session_string: sessionString })
-          .eq('id', user.id);
-
-        return NextResponse.json({
-          success: true,
-          message: 'Authentication successful',
-        });
-      } catch (error) {
-        console.error('[SIGN IN ERROR]:', error);
-        return handleTelegramError(error);
-      }
-    } else if (action === 'extract') {
-      // Retrieve session string from Supabase
-      const { data: userData, error: fetchError } = await supabase
-        .from('users')
-        .select('session_string')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError || !userData.session_string) {
-        return handleErrorResponse('No valid session found. Please authenticate first.', 400);
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in. Please check your validation code and try again.');
       }
 
-      const stringSession = new StringSession(userData.session_string);
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
-      });
-
-      await client.connect();
+      console.log('[SUCCESS]: Signed in successfully');
 
       // Perform data extraction based on extractType
       let extractedData = [];
@@ -234,14 +203,33 @@ export async function POST(req) {
         throw insertError;
       }
 
+      // Clear the phoneCodeHash after successful sign-in
+      const { error: clearError } = await supabase
+        .from('users')
+        .update({ phoneCodeHash: null, code_request_time: null })
+        .eq('id', user.id);
+
+      if (clearError) {
+        console.error('[CLEAR HASH ERROR]:', clearError);
+        // Not throwing here as it's not critical
+      }
+
       return NextResponse.json({
         success: true,
         message: `${extractType} extracted successfully`,
-        data: extractedData,
+        sessionString: client.session.save(),
       });
+    } catch (error) {
+      console.error('[SIGN IN ERROR]:', error);
+      if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
+      }
+      return handleTelegramError(error);
     }
-
-    return handleErrorResponse('Invalid action specified', 400);
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
