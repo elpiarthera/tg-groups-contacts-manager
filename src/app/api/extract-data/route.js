@@ -14,13 +14,11 @@ export async function POST(req) {
   let client;
   try {
     console.log('[START]: Handling API Request');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode, phoneCodeHash, codeRequestTime } = await req.json();
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
 
     console.log('[DEBUG]: Received payload:', { 
       apiId, apiHash, phoneNumber, extractType, 
       validationCode: validationCode ? 'Provided' : 'Not provided',
-      phoneCodeHash: phoneCodeHash ? 'Provided' : 'Not provided',
-      codeRequestTime: codeRequestTime || 'Not provided'
     });
 
     // Input Validation
@@ -86,11 +84,19 @@ export async function POST(req) {
           validPhoneNumber
         );
         console.log('[SUCCESS]: Validation code requested successfully');
+        
+        // Store phoneCodeHash in Supabase
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ phone_code_hash: result.phoneCodeHash, code_request_time: new Date().toISOString() })
+          .eq('id', user.id);
+
+        if (updateError) throw updateError;
+
         return NextResponse.json({
           success: true,
           message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
-          phoneCodeHash: result.phoneCodeHash,
         });
       } catch (error) {
         console.error('[SEND CODE ERROR]:', error);
@@ -98,18 +104,27 @@ export async function POST(req) {
       }
     }
 
+    // Retrieve phoneCodeHash from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('phone_code_hash, code_request_time')
+      .eq('id', user.id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    const { phone_code_hash: phoneCodeHash, code_request_time: codeRequestTime } = userData;
+
     // Check if the code has expired
-    if (codeRequestTime) {
-      const codeRequestDate = new Date(codeRequestTime);
-      const currentTime = new Date();
-      const timeDifference = currentTime - codeRequestDate;
-      if (timeDifference > 120000) { // 2 minutes
-        return NextResponse.json({
-          success: false,
-          message: 'The verification code has expired. Please request a new code.',
-          code: 'PHONE_CODE_EXPIRED'
-        });
-      }
+    const codeRequestDate = new Date(codeRequestTime);
+    const currentTime = new Date();
+    const timeDifference = currentTime - codeRequestDate;
+    if (timeDifference > 120000) { // 2 minutes
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
     }
 
     // Step 2: Sign in with the provided validation code and extract data
@@ -158,6 +173,12 @@ export async function POST(req) {
         .insert(extractedData);
 
       if (insertError) throw insertError;
+
+      // Clear the phoneCodeHash after successful sign-in
+      await supabase
+        .from('users')
+        .update({ phone_code_hash: null, code_request_time: null })
+        .eq('id', user.id);
 
       return NextResponse.json({
         success: true,
