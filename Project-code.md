@@ -30,14 +30,17 @@ Directory Structure:
     ├── src
     │   ├── app
     │   │   ├── api
-    │   │   │   ├── extract-data
-    │   │   │   │   ├── route-working.js
-    │   │   │   │   └── route.js
-    │   │   │   └── telegram-extract.js
+    │   │   │   ├── auth
+    │   │   │   │   └── telegram
+    │   │   │   │       └── route.js
+    │   │   │   └── extract-data
+    │   │   │       └── route.js
     │   │   ├── contacts
     │   │   │   └── page.js
     │   │   ├── contacts-list
     │   │   │   └── page.jsx
+    │   │   ├── dashboard
+    │   │   │   └── page.js
     │   │   ├── groups
     │   │   │   └── page.js
     │   │   ├── groups-list
@@ -61,7 +64,6 @@ Directory Structure:
     │   │   ├── ClientTelegramManager.js
     │   │   ├── ContactsList.jsx
     │   │   ├── GroupsList.jsx
-    │   │   ├── TelegramManager-working.jsx
     │   │   └── TelegramManager.jsx
     │   └── lib
     │       ├── apiUtils.js
@@ -71,9 +73,9 @@ Directory Structure:
     ├── utils
     │   └── config.js
     ├── .eslintrc.js
+    ├── .gitignore
     ├── .vercelignore
     ├── components.json
-    ├── h origin main:master
     ├── jsconfig.json
     ├── next.config.js
     ├── package.json
@@ -84,7 +86,64 @@ Directory Structure:
 
 
 ---
-File: /src/app/api/extract-data/route-working.js
+File: /src/app/api/auth/telegram/route.js
+---
+
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+export async function POST(req) {
+  try {
+    const { id, first_name, last_name, username, photo_url, auth_date, hash } = await req.json();
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    
+    // Check authenticity of the request
+    const checkString = Object.entries({ auth_date, first_name, id, username })
+      .sort()
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+
+    const secret = crypto.createHash('sha256').update(botToken).digest();
+    const expectedHash = crypto.createHmac('sha256', secret).update(checkString).digest('hex');
+
+    if (expectedHash !== hash) {
+      return NextResponse.json({ error: 'Invalid data from Telegram' }, { status: 400 });
+    }
+
+    // Upsert user into Supabase
+    const { data: user, error } = await supabase
+      .from('users')
+      .upsert({
+        telegram_id: id,
+        first_name,
+        last_name,
+        username,
+        photo_url,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error:', error);
+      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, user });
+  } catch (error) {
+    console.error('Server error:', error);
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+
+
+---
+File: /src/app/api/extract-data/route.js
 ---
 
 import { NextResponse } from 'next/server';
@@ -337,441 +396,6 @@ export async function POST(req) {
 
 
 ---
-File: /src/app/api/extract-data/route.js
----
-
-import { NextResponse } from 'next/server';
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { Api } from 'telegram/tl';
-import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
-import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-let client;
-
-export async function POST(req) {
-  try {
-    console.log('[START]: Handling API Request');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = await req.json();
-
-    console.log('[DEBUG]: Received payload:', { 
-      apiId, apiHash, phoneNumber, extractType, action,
-      validationCode: validationCode ? 'Provided' : 'Not provided',
-    });
-
-    // Input Validation
-    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
-    }
-    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
-      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
-    }
-    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
-      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
-    }
-
-    const validPhoneNumber = phoneNumber.trim();
-    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
-
-    checkRateLimit();
-
-    // Check if user exists, if not create a new user in Supabase
-    let { data: user, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('phone_number', validPhoneNumber)
-      .single();
-
-    if (userError && userError.code === 'PGRST116') {
-      // User not found, create a new user
-      const { data: newUser, error: createError } = await supabase
-        .from('users')
-        .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('[USER CREATE ERROR]:', createError);
-        throw createError;
-      }
-      user = newUser;
-      console.log('[DEBUG]: New user created:', user.id);
-    } else if (userError) {
-      console.error('[USER FETCH ERROR]:', userError);
-      throw userError;
-    }
-
-    if (action === 'authenticate') {
-      // Check if a valid session exists
-      if (user.session_string) {
-        try {
-          const stringSession = new StringSession(user.session_string);
-          client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-            connectionRetries: 5,
-            useWSS: true,
-            timeout: 30000,
-          });
-
-          await client.connect();
-          console.log('[SUCCESS]: Reused existing session');
-          return NextResponse.json({
-            success: true,
-            message: 'Authentication successful using existing session',
-          });
-        } catch (error) {
-          console.error('[SESSION REUSE ERROR]:', error);
-          // If session is invalid, clear it and proceed with new authentication
-          await supabase
-            .from('users')
-            .update({ session_string: null })
-            .eq('id', user.id);
-        }
-      }
-
-      // Proceed with new authentication if no valid session exists
-      const stringSession = new StringSession('');
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
-      });
-
-      console.log('[PROCESS]: Connecting to Telegram');
-      await client.connect();
-
-      if (!client.connected) {
-        throw new Error('Failed to connect to Telegram');
-      }
-
-      console.log('[PROCESS]: Requesting validation code');
-      try {
-        const result = await client.sendCode(
-          {
-            apiId: parseInt(apiId),
-            apiHash: apiHash,
-          },
-          validPhoneNumber
-        );
-        console.log('[SUCCESS]: Validation code requested successfully');
-        
-        // Store phoneCodeHash in Supabase
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({ 
-            phoneCodeHash: result.phoneCodeHash, 
-            code_request_time: new Date().toISOString() 
-          })
-          .eq('id', user.id);
-
-        if (updateError) {
-          console.error('[UPDATE ERROR]:', updateError);
-          throw updateError;
-        }
-
-        console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
-
-        return NextResponse.json({
-          success: true,
-          message: 'Validation code sent to your phone. Please provide it in the next step.',
-          requiresValidation: true,
-        });
-      } catch (error) {
-        console.error('[SEND CODE ERROR]:', error);
-        return handleTelegramError(error);
-      }
-    } else if (action === 'verify') {
-      // Retrieve phoneCodeHash from Supabase
-      const { data: userData, error: fetchError } = await supabase
-        .from('users')
-        .select('phoneCodeHash, code_request_time')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError) {
-        console.error('[FETCH ERROR]:', fetchError);
-        throw fetchError;
-      }
-
-      console.log('[DEBUG]: Retrieved user data:', userData);
-
-      const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
-
-      if (!phoneCodeHash || !codeRequestTime) {
-        return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
-      }
-
-      const stringSession = new StringSession('');
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
-      });
-
-      await client.connect();
-
-      console.log('[PROCESS]: Attempting to sign in with provided code');
-      try {
-        const signInResult = await client.invoke(new Api.auth.SignIn({
-          phoneNumber: validPhoneNumber,
-          phoneCodeHash: phoneCodeHash,
-          phoneCode: validationCode
-        }));
-
-        if (!signInResult.user) {
-          throw new Error('Failed to sign in. Please check your validation code and try again.');
-        }
-
-        console.log('[SUCCESS]: Signed in successfully');
-
-        // Save the session string
-        const sessionString = client.session.save();
-        await supabase
-          .from('users')
-          .update({ session_string: sessionString })
-          .eq('id', user.id);
-
-        return NextResponse.json({
-          success: true,
-          message: 'Authentication successful',
-        });
-      } catch (error) {
-        console.error('[SIGN IN ERROR]:', error);
-        return handleTelegramError(error);
-      }
-    } else if (action === 'extract') {
-      // Retrieve session string from Supabase
-      const { data: userData, error: fetchError } = await supabase
-        .from('users')
-        .select('session_string')
-        .eq('id', user.id)
-        .single();
-
-      if (fetchError || !userData.session_string) {
-        return handleErrorResponse('No valid session found. Please authenticate first.', 400);
-      }
-
-      const stringSession = new StringSession(userData.session_string);
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-        useWSS: true,
-        timeout: 30000,
-      });
-
-      try {
-        await client.connect();
-      } catch (error) {
-        if (error.message.includes('AUTH_KEY_UNREGISTERED')) {
-          // Session expired, clear it and ask for re-authentication
-          await supabase
-            .from('users')
-            .update({ session_string: null })
-            .eq('id', user.id);
-          return handleErrorResponse('Session expired. Please authenticate again.', 401);
-        }
-        throw error;
-      }
-
-      // Perform data extraction based on extractType
-      let extractedData = [];
-      if (extractType === 'groups') {
-        const dialogs = await client.getDialogs();
-        extractedData = dialogs.map(dialog => ({
-          group_name: dialog.title,
-          group_id: dialog.id.toString(),
-          participant_count: dialog.participantsCount || 0,
-          type: dialog.isChannel ? 'channel' : 'group',
-          is_public: !!dialog.username,
-          owner_id: user.id,
-        }));
-      } else if (extractType === 'contacts') {
-        const contacts = await client.getContacts();
-        extractedData = contacts.map(contact => ({
-          user_id: contact.id.toString(),
-          first_name: contact.firstName,
-          last_name: contact.lastName,
-          username: contact.username,
-          phone_number: contact.phone,
-          is_mutual_contact: contact.mutualContact,
-          owner_id: user.id,
-        }));
-      } else {
-        throw new Error('Invalid extract type specified');
-      }
-
-      console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
-
-      // Insert extracted data into Supabase
-      const { error: insertError } = await supabase
-        .from(extractType)
-        .insert(extractedData);
-
-      if (insertError) {
-        console.error('[INSERT ERROR]:', insertError);
-        throw insertError;
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `${extractType} extracted successfully`,
-        data: extractedData,
-      });
-    }
-
-    return handleErrorResponse('Invalid action specified', 400);
-  } catch (error) {
-    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
-    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
-  } finally {
-    if (client && client.connected) {
-      try {
-        await client.disconnect();
-        console.log('[CLEANUP]: Telegram client disconnected successfully');
-      } catch (disconnectError) {
-        console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
-      }
-    }
-  }
-}
-
-
----
-File: /src/app/api/telegram-extract.js
----
-
-import { TelegramClient } from 'telegram';
-import { StringSession } from 'telegram/sessions';
-import { Api } from 'telegram/tl';
-import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const { apiId, apiHash, phoneNumber } = req.body;
-
-  try {
-    // Check if user exists and has a valid session
-    let { data: user, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('phone_number', phoneNumber)
-      .single();
-
-    if (userError && userError.code !== 'PGRST116') {
-      throw userError;
-    }
-
-    let client;
-    let sessionString = user?.session_string;
-
-    if (sessionString) {
-      // Reuse existing session
-      const stringSession = new StringSession(sessionString);
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-      });
-
-      try {
-        await client.connect();
-        console.log('Reused existing session');
-      } catch (error) {
-        console.error('Session reuse failed:', error);
-        sessionString = null;
-        // Clear invalid session
-        await supabase
-          .from('users')
-          .update({ session_string: null })
-          .eq('phone_number', phoneNumber);
-      }
-    }
-
-    if (!sessionString) {
-      // Create new session
-      const stringSession = new StringSession('');
-      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-        connectionRetries: 5,
-      });
-
-      console.log('Starting new client...');
-      await client.start({
-        phoneNumber: phoneNumber,
-        phoneCode: async () => {
-          // In a real scenario, you'd need to implement a way to get the phone code from the user
-          // For now, we'll throw an error to indicate that phone code is required
-          throw new Error('Phone code required. Please implement phone code retrieval.');
-        },
-        onError: (err) => console.log(err),
-      });
-
-      // Save new session
-      sessionString = client.session.save();
-      await supabase
-        .from('users')
-        .upsert({ 
-          phone_number: phoneNumber, 
-          api_id: apiId, 
-          api_hash: apiHash, 
-          session_string: sessionString 
-        });
-    }
-
-    console.log('Getting dialogs...');
-    const dialogs = await client.getDialogs();
-    const groups = dialogs.filter(dialog => dialog.isGroup || dialog.isChannel);
-
-    const extractedData = [];
-
-    for (const group of groups) {
-      try {
-        let groupLink = 'Private or No Link Available';
-        try {
-          const exportedInvite = await client.invoke(new Api.messages.ExportChatInvite({
-            peer: group.id,
-          }));
-          groupLink = exportedInvite.link;
-        } catch (e) {
-          console.error(`Failed to get invite link for ${group.title}: ${e}`);
-        }
-
-        extractedData.push({
-          group_name: group.title,
-          group_id: group.id.toString(),
-          group_link: groupLink,
-        });
-
-        // Add a delay to respect rate limits
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
-      } catch (error) {
-        console.error(`Error processing group ${group.title}: ${error}`);
-      }
-    }
-
-    await client.disconnect();
-    res.status(200).json({ success: true, data: extractedData });
-  } catch (error) {
-    console.error('Error:', error);
-    if (error.message.includes('Phone code required')) {
-      res.status(400).json({ error: 'Phone code required for authentication. Please implement phone code retrieval in your frontend.' });
-    } else {
-      res.status(500).json({ error: error.message });
-    }
-  }
-}
-
-
-
----
 File: /src/app/contacts/page.js
 ---
 
@@ -806,6 +430,47 @@ const ContactsListPage = () => {
 };
 
 export default ContactsListPage;
+
+
+---
+File: /src/app/dashboard/page.js
+---
+
+'use client'
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+
+export default function Dashboard() {
+  const [user, setUser] = useState(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setUser(user);
+      } else {
+        router.push('/');
+      }
+    };
+
+    checkUser();
+  }, [router]);
+
+  if (!user) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div className="container mx-auto py-10">
+      <h1 className="text-2xl font-bold mb-4">Welcome, {user.username || user.first_name}!</h1>
+      {/* Add dashboard content here */}
+    </div>
+  );
+}
+
 
 
 ---
@@ -1714,7 +1379,7 @@ export default function GroupsList() {
 
 
 ---
-File: /src/components/TelegramManager-working.jsx
+File: /src/components/TelegramManager.jsx
 ---
 
 import React, { useState, useEffect } from 'react'
@@ -1794,7 +1459,7 @@ export default function TelegramManager() {
         validationCode: payload.validationCode ? '******' : undefined,
       })
 
-      const response = await fetch('/api/telegram-extract', {
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1916,251 +1581,6 @@ export default function TelegramManager() {
   )
 }
 
-
-
----
-File: /src/components/TelegramManager.jsx
----
-
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { Loader2 } from 'lucide-react'
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-
-export default function TelegramManager() {
-  const router = useRouter()
-  const [apiId, setApiId] = useState('')
-  const [apiHash, setApiHash] = useState('')
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [extractType, setExtractType] = useState('groups')
-  const [validationCode, setValidationCode] = useState('')
-  const [error, setError] = useState(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [requiresValidation, setRequiresValidation] = useState(false)
-
-  const validateInputs = () => {
-    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      setError('API ID must be a valid positive number')
-      return false
-    }
-    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
-      setError('API Hash should be a 32-character hexadecimal string')
-      return false
-    }
-    if (!phoneNumber || phoneNumber.trim() === '') {
-      setError('Please enter a valid phone number')
-      return false
-    }
-    return true
-  }
-
-  const handleAuthenticate = async () => {
-    setError(null)
-    setIsLoading(true)
-
-    if (!validateInputs()) {
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      const payload = {
-        apiId: parseInt(apiId),
-        apiHash,
-        phoneNumber: phoneNumber.trim(),
-        action: 'authenticate',
-      }
-
-      const response = await fetch('/api/extract-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to authenticate')
-      }
-
-      if (data.requiresValidation) {
-        setRequiresValidation(true)
-      } else {
-        // Authentication successful, proceed to extraction
-        handleExtract()
-      }
-    } catch (error) {
-      console.error('[ERROR]: Authentication failed:', error)
-      setError(error.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleVerify = async () => {
-    setError(null)
-    setIsLoading(true)
-
-    try {
-      const payload = {
-        apiId: parseInt(apiId),
-        apiHash,
-        phoneNumber: phoneNumber.trim(),
-        validationCode,
-        action: 'verify',
-      }
-
-      const response = await fetch('/api/extract-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to verify')
-      }
-
-      // Verification successful, proceed to extraction
-      handleExtract()
-    } catch (error) {
-      console.error('[ERROR]: Verification failed:', error)
-      setError(error.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleExtract = async () => {
-    setError(null)
-    setIsLoading(true)
-
-    try {
-      const payload = {
-        apiId: parseInt(apiId),
-        apiHash,
-        phoneNumber: phoneNumber.trim(),
-        extractType,
-        action: 'extract',
-      }
-
-      const response = await fetch('/api/extract-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to extract data')
-      }
-
-      alert(`Extracted ${data.data.length} ${extractType}`)
-      router.push(`/${extractType}-list`)
-    } catch (error) {
-      console.error('[ERROR]: Extraction failed:', error)
-      setError(error.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    if (requiresValidation) {
-      handleVerify()
-    } else {
-      handleAuthenticate()
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
-      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Telegram Extractor</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="api-id">API ID</Label>
-              <Input
-                id="api-id"
-                value={apiId}
-                onChange={(e) => setApiId(e.target.value)}
-                required
-                disabled={isLoading || requiresValidation}
-                placeholder="Enter your API ID"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="api-hash">API Hash</Label>
-              <Input
-                id="api-hash"
-                value={apiHash}
-                onChange={(e) => setApiHash(e.target.value)}
-                required
-                disabled={isLoading || requiresValidation}
-                placeholder="Enter your API Hash"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone-number">Phone Number</Label>
-              <Input
-                id="phone-number"
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                required
-                disabled={isLoading || requiresValidation}
-                placeholder="Enter your phone number (with country code)"
-              />
-            </div>
-            {requiresValidation && (
-              <div className="space-y-2">
-                <Label htmlFor="validation-code">Validation Code</Label>
-                <Input
-                  id="validation-code"
-                  value={validationCode}
-                  onChange={(e) => setValidationCode(e.target.value)}
-                  required
-                  disabled={isLoading}
-                  placeholder="Enter the validation code"
-                />
-              </div>
-            )}
-            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
-                <Label htmlFor="groups">Extract Groups</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
-                <Label htmlFor="contacts">Extract Contacts</Label>
-              </div>
-            </RadioGroup>
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (requiresValidation ? 'Verify' : 'Authenticate')}
-            </Button>
-          </form>
-          {error && (
-            <Alert variant="destructive" className="mt-4">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
 
 
 ---
@@ -2367,6 +1787,72 @@ module.exports = {
 
 
 ---
+File: /.gitignore
+---
+
+# Ignore Vercel deployment configurations
+.vercel
+
+# Ignore dependencies
+node_modules/
+
+# Ignore environment variables (for security)
+.env
+.env.local
+.env.production
+.env.development
+
+# Ignore Python virtual environment (if applicable)
+venv/
+
+# Ignore Next.js build outputs
+.next/
+
+# Ignore any local build or distribution folders
+dist/
+build/
+
+# Ignore IDE or editor configurations
+.vscode/
+.idea/
+.editorconfig  # Only exclude if you don't need it in the repo
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore log files and other temporary files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ignore coverage reports
+coverage/
+*.lcov
+
+# Ignore test configurations and reports
+*.test.js
+*.spec.js
+jest.config.js
+
+# Ignore project documentation files
+Project-code.md
+.cursorrules
+
+# Optional: Lock files should generally be included for consistent dependency versions
+# package-lock.json
+# yarn.lock
+
+# Exclude specific unnecessary folders/files (modify if not needed)
+.project-code/
+.node_modules/
+
+# Optional: Ignore temporary files created by your OS or editors
+Thumbs.db
+
+
+
+---
 File: /.vercelignore
 ---
 
@@ -2441,42 +1927,6 @@ File: /components.json
 
 
 ---
-File: /h origin main:master
----
-
-[33mcommit 0c4a6a78842080bd0ac714787d69edec6ceac27e[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
-Author: elpiarthera <artherasmg@gmail.com>
-Date:   Sun Sep 29 20:22:28 2024 +0200
-
-    Update Telegram Manager, API routes, and fix import issues
-
-[33mcommit c20606efa3fa1e932967e5baf031e0a6dfa6b53d[m
-Author: elpiarthera <artherasmg@gmail.com>
-Date:   Sun Sep 29 20:18:50 2024 +0200
-
-    Update Supabase configuration and environment variables
-
-[33mcommit a5d9c7bb05f8a7beb5fb316ad357f0eef5f12991[m
-Author: elpiarthera <artherasmg@gmail.com>
-Date:   Sun Sep 29 20:09:40 2024 +0200
-
-    MVP version ready for testing
-
-[33mcommit 490e6a289dc8cd158ea7e75ba71296654f22d72f[m
-Author: elpiarthera <artherasmg@gmail.com>
-Date:   Sat Sep 28 23:13:04 2024 +0200
-
-    Configured API base URL and updated imports
-
-[33mcommit de148b641169912ee3170388a55706c45580e55e[m
-Author: elpiarthera <artherasmg@gmail.com>
-Date:   Sat Sep 28 22:30:27 2024 +0200
-
-    Updated TelegramManager to allow direct API ID, API Hash, and Phone Number submission
-
-
-
----
 File: /jsconfig.json
 ---
 
@@ -2502,6 +1952,7 @@ module.exports = {
       NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
       NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+      NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME,
     },
     // Add this section to ignore type checking during build
     typescript: {
