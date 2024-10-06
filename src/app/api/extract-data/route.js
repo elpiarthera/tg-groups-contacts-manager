@@ -48,7 +48,11 @@ export async function POST(req) {
       // User not found, create a new user
       const { data: newUser, error: createError } = await supabase
         .from('users')
-        .insert({ phone_number: validPhoneNumber })
+        .insert({ 
+          phone_number: validPhoneNumber,
+          api_id: apiId,
+          api_hash: apiHash
+        })
         .select()
         .single();
 
@@ -61,6 +65,20 @@ export async function POST(req) {
     } else if (userError) {
       console.error('[USER FETCH ERROR]:', userError);
       return handleErrorResponse('Error fetching user data', 500);
+    } else {
+      // User exists, update API ID and Hash if they've changed
+      if (user.api_id !== apiId || user.api_hash !== apiHash) {
+        const { error: updateError } = await supabase
+          .from('users')
+          .update({ api_id: apiId, api_hash: apiHash })
+          .eq('id', user.id);
+
+        if (updateError) {
+          console.error('[USER UPDATE ERROR]:', updateError);
+          return handleErrorResponse('Failed to update user data', 500);
+        }
+        console.log('[DEBUG]: User API credentials updated');
+      }
     }
 
     const stringSession = new StringSession(user?.session_string || '');
