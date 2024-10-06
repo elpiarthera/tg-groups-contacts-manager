@@ -13,7 +13,6 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 let client;
 
 export async function POST(req) {
-  let extractedData = [];
   try {
     console.log('[START]: Handling API Request');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
@@ -51,37 +50,39 @@ export async function POST(req) {
     await client.connect();
     console.log('[DEBUG]: Connected to Telegram');
 
-    const sessionString = client.session.save();
-    console.log('[DEBUG]: Session string saved');
-
     if (!validationCode) {
       console.log('[DEBUG]: Requesting phone code...');
-      const result = await client.sendCode({
-        apiId: parseInt(apiId),
-        apiHash: apiHash,
-        phoneNumber: validPhoneNumber,
-      });
-      console.log('[DEBUG]: Phone code requested');
-
-      // Store the phone code hash in Supabase
-      const { error } = await supabase
-        .from('users')
-        .upsert({ 
-          phone_number: validPhoneNumber,
-          phoneCodeHash: result.phoneCodeHash,
-          code_request_time: new Date().toISOString()
+      try {
+        const result = await client.sendCode({
+          apiId: parseInt(apiId),
+          apiHash,
+          phone: validPhoneNumber,
         });
+        console.log('[DEBUG]: Phone code requested successfully');
 
-      if (error) {
-        console.error('[ERROR]: Error storing phone code hash:', error);
-        return handleErrorResponse('Error storing phone code hash', 500);
+        // Store the phone code hash in Supabase
+        const { error } = await supabase
+          .from('users')
+          .upsert({ 
+            phone_number: validPhoneNumber,
+            phoneCodeHash: result.phoneCodeHash,
+            code_request_time: new Date().toISOString()
+          });
+
+        if (error) {
+          console.error('[ERROR]: Error storing phone code hash:', error);
+          return handleErrorResponse('Error storing phone code hash', 500);
+        }
+
+        return NextResponse.json({ 
+          success: true, 
+          message: 'Validation code sent. Please check your Telegram app.',
+          requiresValidation: true
+        });
+      } catch (error) {
+        console.error('[ERROR]: Failed to send code:', error);
+        return handleErrorResponse('Failed to send validation code', 500, error);
       }
-
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Validation code sent. Please check your Telegram app.',
-        requiresValidation: true
-      });
     }
 
     // Validation code provided, proceed with sign in
@@ -122,6 +123,7 @@ export async function POST(req) {
 
     // Proceed with data extraction
     console.log('[DEBUG]: Proceeding with data extraction');
+    let extractedData = [];
     if (extractType === 'groups') {
       extractedData = await extractGroups(client);
     } else if (extractType === 'contacts') {
@@ -134,15 +136,6 @@ export async function POST(req) {
   } catch (error) {
     console.error('[ERROR]: An unexpected error occurred:', error);
     return handleErrorResponse('An unexpected error occurred', 500, error);
-  } finally {
-    if (client && client.connected) {
-      try {
-        await client.disconnect();
-        console.log('[CLEANUP]: Telegram client disconnected successfully');
-      } catch (disconnectError) {
-        console.error('[DISCONNECT ERROR]: Error disconnecting Telegram client:', disconnectError);
-      }
-    }
   }
 }
 
