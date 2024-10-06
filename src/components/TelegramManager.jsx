@@ -72,12 +72,13 @@ export default function TelegramManager() {
       }
 
       if (data.code === 'PHONE_CODE_EXPIRED') {
-        alert('The verification code has expired. Please request a new code.')
+        setError('The verification code has expired. Please request a new code.')
         setShowValidationInput(false)
-        setValidationCode('')  // Reset validation code
+        setValidationCode('')
+        setPhoneCodeHash('')
       } else if (data.requiresValidation) {
         setShowValidationInput(true)
-        setPhoneCodeHash(data.phoneCodeHash)  // Store the phoneCodeHash
+        setPhoneCodeHash(data.phoneCodeHash)
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {

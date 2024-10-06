@@ -87,7 +87,7 @@ export async function POST(req) {
           success: true,
           message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
-          phoneCodeHash: result.phoneCodeHash,  // Return phoneCodeHash for later verification
+          phoneCodeHash: result.phoneCodeHash,
         });
       } catch (error) {
         console.error('[SEND CODE ERROR]:', error);
@@ -98,11 +98,16 @@ export async function POST(req) {
     // Step 2: Sign in with the provided validation code and extract data
     console.log('[PROCESS]: Attempting to sign in with provided code');
     try {
-      await client.invoke(new Api.auth.SignIn({
+      const signInResult = await client.invoke(new Api.auth.SignIn({
         phoneNumber: validPhoneNumber,
-        phoneCodeHash: phoneCodeHash,  // Use the phoneCodeHash from the request
-        phoneCode: validationCode      // Use the validation code provided by the user
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode
       }));
+
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in. Please check your validation code and try again.');
+      }
+
       console.log('[SUCCESS]: Signed in successfully');
 
       // Perform data extraction based on extractType
@@ -132,7 +137,7 @@ export async function POST(req) {
 
       // Insert extracted data into Supabase
       const { error: insertError } = await supabase
-        .from(extractType)  // Use 'groups' or 'contacts' table dynamically
+        .from(extractType)
         .insert(extractedData);
 
       if (insertError) throw insertError;
@@ -143,15 +148,14 @@ export async function POST(req) {
         sessionString: client.session.save(),
       });
     } catch (error) {
+      console.error('[SIGN IN ERROR]:', error);
       if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
-        console.error('[SIGN IN ERROR]: Phone code has expired');
         return NextResponse.json({
           success: false,
           message: 'The verification code has expired. Please request a new code.',
           code: 'PHONE_CODE_EXPIRED'
         });
       }
-      console.error('[SIGN IN ERROR]:', error);
       return handleTelegramError(error);
     }
   } catch (error) {
