@@ -71,8 +71,8 @@ Directory Structure:
     ├── utils
     │   └── config.js
     ├── .eslintrc.js
-    ├── .gitignore
     ├── .vercelignore
+    ├── components.json
     ├── h origin main:master
     ├── jsconfig.json
     ├── next.config.js
@@ -407,6 +407,33 @@ export async function POST(req) {
     }
 
     if (action === 'authenticate') {
+      // Check if a valid session exists
+      if (user.session_string) {
+        try {
+          const stringSession = new StringSession(user.session_string);
+          client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+            connectionRetries: 5,
+            useWSS: true,
+            timeout: 30000,
+          });
+
+          await client.connect();
+          console.log('[SUCCESS]: Reused existing session');
+          return NextResponse.json({
+            success: true,
+            message: 'Authentication successful using existing session',
+          });
+        } catch (error) {
+          console.error('[SESSION REUSE ERROR]:', error);
+          // If session is invalid, clear it and proceed with new authentication
+          await supabase
+            .from('users')
+            .update({ session_string: null })
+            .eq('id', user.id);
+        }
+      }
+
+      // Proceed with new authentication if no valid session exists
       const stringSession = new StringSession('');
       client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
         connectionRetries: 5,
@@ -535,7 +562,19 @@ export async function POST(req) {
         timeout: 30000,
       });
 
-      await client.connect();
+      try {
+        await client.connect();
+      } catch (error) {
+        if (error.message.includes('AUTH_KEY_UNREGISTERED')) {
+          // Session expired, clear it and ask for re-authentication
+          await supabase
+            .from('users')
+            .update({ session_string: null })
+            .eq('id', user.id);
+          return handleErrorResponse('Session expired. Please authenticate again.', 401);
+        }
+        throw error;
+      }
 
       // Perform data extraction based on extractType
       let extractedData = [];
@@ -600,7 +639,6 @@ export async function POST(req) {
 }
 
 
-
 ---
 File: /src/app/api/telegram-extract.js
 ---
@@ -608,6 +646,12 @@ File: /src/app/api/telegram-extract.js
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
 import { Api } from 'telegram/tl';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -616,22 +660,71 @@ export default async function handler(req, res) {
 
   const { apiId, apiHash, phoneNumber } = req.body;
 
-  const stringSession = new StringSession(''); // You can save the session string to avoid logging in every time
-  const client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-    connectionRetries: 5,
-  });
-
   try {
-    console.log('Starting client...');
-    await client.start({
-      phoneNumber: phoneNumber,
-      phoneCode: async () => {
-        // In a real scenario, you'd need to implement a way to get the phone code from the user
-        // For now, we'll throw an error to indicate that phone code is required
-        throw new Error('Phone code required. Please implement phone code retrieval.');
-      },
-      onError: (err) => console.log(err),
-    });
+    // Check if user exists and has a valid session
+    let { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', phoneNumber)
+      .single();
+
+    if (userError && userError.code !== 'PGRST116') {
+      throw userError;
+    }
+
+    let client;
+    let sessionString = user?.session_string;
+
+    if (sessionString) {
+      // Reuse existing session
+      const stringSession = new StringSession(sessionString);
+      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+        connectionRetries: 5,
+      });
+
+      try {
+        await client.connect();
+        console.log('Reused existing session');
+      } catch (error) {
+        console.error('Session reuse failed:', error);
+        sessionString = null;
+        // Clear invalid session
+        await supabase
+          .from('users')
+          .update({ session_string: null })
+          .eq('phone_number', phoneNumber);
+      }
+    }
+
+    if (!sessionString) {
+      // Create new session
+      const stringSession = new StringSession('');
+      client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+        connectionRetries: 5,
+      });
+
+      console.log('Starting new client...');
+      await client.start({
+        phoneNumber: phoneNumber,
+        phoneCode: async () => {
+          // In a real scenario, you'd need to implement a way to get the phone code from the user
+          // For now, we'll throw an error to indicate that phone code is required
+          throw new Error('Phone code required. Please implement phone code retrieval.');
+        },
+        onError: (err) => console.log(err),
+      });
+
+      // Save new session
+      sessionString = client.session.save();
+      await supabase
+        .from('users')
+        .upsert({ 
+          phone_number: phoneNumber, 
+          api_id: apiId, 
+          api_hash: apiHash, 
+          session_string: sessionString 
+        });
+    }
 
     console.log('Getting dialogs...');
     const dialogs = await client.getDialogs();
@@ -1845,8 +1938,10 @@ export default function TelegramManager() {
   const [apiHash, setApiHash] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
   const [error, setError] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [requiresValidation, setRequiresValidation] = useState(false)
 
   const validateInputs = () => {
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
@@ -1864,8 +1959,7 @@ export default function TelegramManager() {
     return true
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleAuthenticate = async () => {
     setError(null)
     setIsLoading(true)
 
@@ -1879,44 +1973,111 @@ export default function TelegramManager() {
         apiId: parseInt(apiId),
         apiHash,
         phoneNumber: phoneNumber.trim(),
-        extractType,
+        action: 'authenticate',
       }
 
-      console.log('[DEBUG]: Submitting request with:', {
-        ...payload,
-        apiHash: '******',
-        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
-      })
-
-      const response = await fetch('/api/telegram-extract', {
+      const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
 
       const data = await response.json()
-      console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process request')
+        throw new Error(data.error || 'Failed to authenticate')
       }
 
-      if (data.success) {
-        if (data.data) {
-          alert(`Extracted ${data.data.length} ${extractType}`)
-          // Here you might want to save the data or redirect to a results page
-          router.push(`/${extractType}-list`)
-        } else {
-          alert('Extraction completed successfully.')
-        }
+      if (data.requiresValidation) {
+        setRequiresValidation(true)
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        // Authentication successful, proceed to extraction
+        handleExtract()
       }
     } catch (error) {
-      console.error('[ERROR]: Extract failed:', error)
+      console.error('[ERROR]: Authentication failed:', error)
       setError(error.message)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleVerify = async () => {
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        validationCode,
+        action: 'verify',
+      }
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to verify')
+      }
+
+      // Verification successful, proceed to extraction
+      handleExtract()
+    } catch (error) {
+      console.error('[ERROR]: Verification failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleExtract = async () => {
+    setError(null)
+    setIsLoading(true)
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        action: 'extract',
+      }
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract data')
+      }
+
+      alert(`Extracted ${data.data.length} ${extractType}`)
+      router.push(`/${extractType}-list`)
+    } catch (error) {
+      console.error('[ERROR]: Extraction failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    if (requiresValidation) {
+      handleVerify()
+    } else {
+      handleAuthenticate()
     }
   }
 
@@ -1936,7 +2097,7 @@ export default function TelegramManager() {
                 value={apiId}
                 onChange={(e) => setApiId(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your API ID"
               />
             </div>
@@ -1947,7 +2108,7 @@ export default function TelegramManager() {
                 value={apiHash}
                 onChange={(e) => setApiHash(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your API Hash"
               />
             </div>
@@ -1958,10 +2119,23 @@ export default function TelegramManager() {
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 required
-                disabled={isLoading}
+                disabled={isLoading || requiresValidation}
                 placeholder="Enter your phone number (with country code)"
               />
             </div>
+            {requiresValidation && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the validation code"
+                />
+              </div>
+            )}
             <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
               <div className="flex items-center space-x-2">
                 <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
@@ -1973,7 +2147,7 @@ export default function TelegramManager() {
               </div>
             </RadioGroup>
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Extract Data'}
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (requiresValidation ? 'Verify' : 'Authenticate')}
             </Button>
           </form>
           {error && (
@@ -1987,7 +2161,6 @@ export default function TelegramManager() {
     </div>
   )
 }
-
 
 
 ---
@@ -2194,72 +2367,6 @@ module.exports = {
 
 
 ---
-File: /.gitignore
----
-
-# Ignore Vercel deployment configurations
-.vercel
-
-# Ignore dependencies
-node_modules/
-
-# Ignore environment variables (for security)
-.env
-.env.local
-.env.production
-.env.development
-
-# Ignore Python virtual environment (if applicable)
-venv/
-
-# Ignore Next.js build outputs
-.next/
-
-# Ignore any local build or distribution folders
-dist/
-build/
-
-# Ignore IDE or editor configurations
-.vscode/
-.idea/
-.editorconfig  # Only exclude if you don't need it in the repo
-
-# Ignore macOS system files
-.DS_Store
-
-# Ignore log files and other temporary files
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Ignore coverage reports
-coverage/
-*.lcov
-
-# Ignore test configurations and reports
-*.test.js
-*.spec.js
-jest.config.js
-
-# Ignore project documentation files
-Project-code.md
-.cursorrules
-
-# Optional: Lock files should generally be included for consistent dependency versions
-# package-lock.json
-# yarn.lock
-
-# Exclude specific unnecessary folders/files (modify if not needed)
-.project-code/
-.node_modules/
-
-# Optional: Ignore temporary files created by your OS or editors
-Thumbs.db
-
-
-
----
 File: /.vercelignore
 ---
 
@@ -2310,6 +2417,27 @@ Thumbs.db  # Windows
 # package-lock.json
 # yarn.lock
 
+
+
+---
+File: /components.json
+---
+
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tailwind": {
+    "config": "tailwind.config.js",
+    "css": "styles/global.css",
+    "baseColor": "slate",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils"
+  }
+}
 
 
 ---
