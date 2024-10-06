@@ -66,9 +66,14 @@ export async function POST(req) {
         .select()
         .single();
 
-      if (createError) throw createError;
+      if (createError) {
+        console.error('[USER CREATE ERROR]:', createError);
+        throw createError;
+      }
       user = newUser;
+      console.log('[DEBUG]: New user created:', user.id);
     } else if (userError) {
+      console.error('[USER FETCH ERROR]:', userError);
       throw userError;
     }
 
@@ -85,13 +90,21 @@ export async function POST(req) {
         );
         console.log('[SUCCESS]: Validation code requested successfully');
         
-        // Store phoneCodeHash in Supabase
+        // Store phone_code_hash in Supabase
         const { error: updateError } = await supabase
           .from('users')
-          .update({ phone_code_hash: result.phoneCodeHash, code_request_time: new Date().toISOString() })
+          .update({ 
+            phone_code_hash: result.phoneCodeHash, 
+            code_request_time: new Date().toISOString() 
+          })
           .eq('id', user.id);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('[UPDATE ERROR]:', updateError);
+          throw updateError;
+        }
+
+        console.log('[DEBUG]: Updated user with phone_code_hash and code_request_time');
 
         return NextResponse.json({
           success: true,
@@ -104,14 +117,19 @@ export async function POST(req) {
       }
     }
 
-    // Retrieve phoneCodeHash from Supabase
+    // Retrieve phone_code_hash from Supabase
     const { data: userData, error: fetchError } = await supabase
       .from('users')
       .select('phone_code_hash, code_request_time')
       .eq('id', user.id)
       .single();
 
-    if (fetchError) throw fetchError;
+    if (fetchError) {
+      console.error('[FETCH ERROR]:', fetchError);
+      throw fetchError;
+    }
+
+    console.log('[DEBUG]: Retrieved user data:', userData);
 
     const { phone_code_hash: phoneCodeHash, code_request_time: codeRequestTime } = userData;
 
@@ -173,18 +191,28 @@ export async function POST(req) {
         throw new Error('Invalid extract type specified');
       }
 
+      console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
       // Insert extracted data into Supabase
       const { error: insertError } = await supabase
         .from(extractType)
         .insert(extractedData);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('[INSERT ERROR]:', insertError);
+        throw insertError;
+      }
 
-      // Clear the phoneCodeHash after successful sign-in
-      await supabase
+      // Clear the phone_code_hash after successful sign-in
+      const { error: clearError } = await supabase
         .from('users')
         .update({ phone_code_hash: null, code_request_time: null })
         .eq('id', user.id);
+
+      if (clearError) {
+        console.error('[CLEAR HASH ERROR]:', clearError);
+        // Not throwing here as it's not critical
+      }
 
       return NextResponse.json({
         success: true,
