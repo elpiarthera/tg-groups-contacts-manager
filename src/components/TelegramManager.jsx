@@ -28,7 +28,7 @@ export default function TelegramManager() {
         setShowValidationInput(false)
         setValidationCode('')
         setCodeRequestTime(null)
-      }, 120000) // 2 minutes expiration
+      }, 15 * 60 * 1000) // 15 minutes expiration, matching the server-side
       return () => clearTimeout(timer)
     }
   }, [showValidationInput, codeRequestTime])
@@ -42,8 +42,8 @@ export default function TelegramManager() {
       setError('API Hash should be a 32-character hexadecimal string')
       return false
     }
-    if (!phoneNumber || phoneNumber.trim() === '') {
-      setError('Please enter a valid phone number')
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
       return false
     }
     return true
@@ -85,7 +85,7 @@ export default function TelegramManager() {
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process request')
+        throw new Error(data.error?.message || 'Failed to process request')
       }
 
       if (data.requiresValidation) {
@@ -103,7 +103,7 @@ export default function TelegramManager() {
           router.push(`/${extractType}-list`)
         }
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        setError(data.message || 'An unexpected error occurred. Please try again.')
       }
     } catch (error) {
       console.error('[ERROR]: Submit failed:', error)
