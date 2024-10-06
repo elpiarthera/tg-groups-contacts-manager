@@ -1,3 +1,28 @@
+Process:
+User Form Submission:
+
+The user fills in the form with:
+API ID
+API Hash
+Phone Number
+Selects either "Extract Groups" or "Extract Contacts"
+User clicks on Request Code.
+What happens here:
+
+The API should validate the inputs (API ID, API Hash, and Phone Number).
+If validation passes, the API sends a request to Telegram to send the verification code to the user's phone number.
+The user is created in Supabase if they don't already exist.
+No data extraction happens at this stage—just the request for the verification code.
+User Submits Verification Code:
+
+The user receives the verification code on their phone.
+They enter the verification code into the form and submit it.
+What happens here:
+
+The API takes the verification code and verifies it with Telegram.
+Once verified, the API makes a request to Telegram to extract either groups or contacts, based on the user’s selection.
+The extracted data is then stored in Supabase (either in the groups or contacts table).
+____________________________________________________________________________
 Directory Structure:
 
 └── ./
@@ -39,6 +64,9 @@ Directory Structure:
     │       ├── csvUtils.js
     │       ├── supabase.js
     │       └── utils.js
+    ├── utils
+    │   └── config.js
+    ├── .eslintrc.js
     ├── .gitignore
     ├── .vercelignore
     ├── components.json
@@ -59,13 +87,17 @@ File: /src/app/api/extract-data/route.js
 import { NextResponse } from 'next/server';
 import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions';
-import input from 'input'; // Add this import
 import { Api } from 'telegram/tl';
-import { errors } from 'telegram';
 import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(req) {
-  let client;
+    let client;
   try {
     console.log('[START]: Extracting data');
     const { apiId, apiHash, phoneNumber, extractType, validationCode, phoneCodeHash } = await req.json();
@@ -92,7 +124,7 @@ export async function POST(req) {
 
     checkRateLimit();
 
-    const stringSession = new StringSession(''); // You can save the string session to avoid logging in again
+    const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
     });
@@ -102,6 +134,27 @@ export async function POST(req) {
 
     if (!client.connected) {
       throw new Error('Failed to connect to Telegram');
+    }
+
+    // Check if user exists, if not create a new user
+    let { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (userError && userError.code === 'PGRST116') {
+      // User not found, create a new user
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      user = newUser;
+    } else if (userError) {
+      throw userError;
     }
 
     if (!validationCode) {
@@ -125,25 +178,58 @@ export async function POST(req) {
         console.error('[SEND CODE ERROR]:', error);
         return handleTelegramError(error);
       }
+    } else {
+      console.log('[PROCESS]: Attempting to sign in with provided code');
+      try {
+        await client.invoke(new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        }));
+        console.log('[SUCCESS]: Signed in successfully');
+
+        // Perform data extraction here based on extractType
+        let extractedData = [];
+        if (extractType === 'groups') {
+          const dialogs = await client.getDialogs();
+          extractedData = dialogs.map(dialog => ({
+            group_name: dialog.title,
+            group_id: dialog.id.toString(),
+            participant_count: dialog.participantsCount || 0,
+            type: dialog.isChannel ? 'channel' : 'group',
+            is_public: !!dialog.username,
+            owner_id: user.id,
+          }));
+        } else if (extractType === 'contacts') {
+          const contacts = await client.getContacts();
+          extractedData = contacts.map(contact => ({
+            user_id: contact.id.toString(),
+            first_name: contact.firstName,
+            last_name: contact.lastName,
+            username: contact.username,
+            phone_number: contact.phone,
+            is_mutual_contact: contact.mutualContact,
+            owner_id: user.id,
+          }));
+        }
+
+        // Insert extracted data into the appropriate table
+        const { error: insertError } = await supabase
+          .from(extractType)
+          .insert(extractedData);
+
+        if (insertError) throw insertError;
+
+        return NextResponse.json({
+          success: true,
+          message: `${extractType} extracted successfully`,
+          sessionString: client.session.save(),
+        });
+      } catch (error) {
+        console.error('[SIGN IN ERROR]:', error);
+        return handleTelegramError(error);
+      }
     }
-
-    console.log('[PROCESS]: Starting sign-in');
-    try {
-      await client.start({
-        phoneNumber: async () => validPhoneNumber,
-        password: async () => await input.text('Please enter your password: '),
-        phoneCode: async () => validationCode,
-        onError: (err) => console.log(err),
-      });
-    } catch (error) {
-      console.error('[SIGN IN ERROR]:', error);
-      return handleTelegramError(error);
-    }
-
-    console.log('[SUCCESS]: Signed in successfully');
-
-    // Rest of your code for extracting data...
-
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
@@ -158,7 +244,6 @@ export async function POST(req) {
     }
   }
 }
-
 
 
 ---
@@ -222,17 +307,29 @@ File: /src/app/groups-list/page.jsx
 ---
 
 import React from 'react';
+import { supabase } from '@/lib/apiUtils';
 
-const GroupsListPage = () => {
+const GroupsList = async () => {
+  const { data: groups, error } = await supabase.from('groups').select('*');
+
+  if (error) {
+    console.error('Error fetching groups:', error);
+    return <div>Error loading groups</div>;
+  }
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Groups List</h1>
-      <p>This page will display the extracted groups.</p>
+    <div>
+      <h1>Groups List</h1>
+      <ul>
+        {groups.map((group) => (
+          <li key={group.id}>{group.name}</li>
+        ))}
+      </ul>
     </div>
   );
 };
 
-export default GroupsListPage;
+export default GroupsList;
 
 
 ---
@@ -1095,52 +1192,52 @@ export default function GroupsList() {
 File: /src/components/TelegramManager.jsx
 ---
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import React, { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
-const TelegramManager = () => {
-  const router = useRouter();
-  const [apiId, setApiId] = useState('');
-  const [apiHash, setApiHash] = useState('');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [extractType, setExtractType] = useState('groups');
-  const [validationCode, setValidationCode] = useState('');
-  const [showValidationInput, setShowValidationInput] = useState(false);
-  const [phoneCodeHash, setPhoneCodeHash] = useState('');
-  const [error, setError] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
+export default function TelegramManager() {
+  const router = useRouter()
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [phoneCodeHash, setPhoneCodeHash] = useState('')
+  const [error, setError] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
 
   const validateInputs = () => {
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      setError('API ID must be a valid positive number');
-      return false;
+      setError('API ID must be a valid positive number')
+      return false
     }
     if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
-      setError('API Hash should be a 32-character hexadecimal string');
-      return false;
+      setError('API Hash should be a 32-character hexadecimal string')
+      return false
     }
     if (!phoneNumber || phoneNumber.trim() === '') {
-      setError('Please enter a valid phone number');
-      return false;
+      setError('Please enter a valid phone number')
+      return false
     }
-    return true;
-  };
+    return true
+  }
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setIsLoading(true);
+        e.preventDefault()
+    setError(null)
+    setIsLoading(true)
 
     if (!validateInputs()) {
-      setIsLoading(false);
-      return;
+      setIsLoading(false)
+      return
     }
 
     try {
@@ -1151,118 +1248,119 @@ const TelegramManager = () => {
         extractType,
         validationCode: showValidationInput ? validationCode : undefined,
         phoneCodeHash: showValidationInput ? phoneCodeHash : undefined,
-      };
-      console.log('[DEBUG]: Submitting request with:', payload);
+      }
+      console.log('[DEBUG]: Submitting request with:', payload)
       const response = await fetch('/api/extract-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      });
+      })
 
-      const data = await response.json();
-      console.log('[DEBUG]: Received response:', data);
+      const data = await response.json()
+      console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to initiate extraction');
+        throw new Error(data.error?.message || 'Failed to initiate extraction')
       }
 
       if (data.requiresValidation) {
-        setShowValidationInput(true);
-        setPhoneCodeHash(data.phoneCodeHash);
-        setError(null);
-        alert('Please enter the validation code sent to your Telegram app.');
+        setShowValidationInput(true)
+        setPhoneCodeHash(data.phoneCodeHash)
+        setError(null)
+        alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {
-        router.push(`/${extractType}-list`);
+        router.push(`/${extractType}-list`)
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        setError('An unexpected error occurred. Please try again.')
       }
     } catch (error) {
-      console.error('[ERROR]: Submit failed:', error);
-      setError(error.message);
+      console.error('[ERROR]: Submit failed:', error)
+      setError(error.message)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle>Telegram Extractor</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="api-id">API ID</Label>
-            <Input
-              id="api-id"
-              value={apiId}
-              onChange={(e) => setApiId(e.target.value)}
-              required
-              disabled={isLoading}
-              placeholder="Enter your API ID"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="api-hash">API Hash</Label>
-            <Input
-              id="api-hash"
-              value={apiHash}
-              onChange={(e) => setApiHash(e.target.value)}
-              required
-              disabled={isLoading}
-              placeholder="Enter your API Hash"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="phone-number">Phone Number</Label>
-            <Input
-              id="phone-number"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              required
-              disabled={isLoading}
-              placeholder="Enter your phone number (with country code)"
-            />
-          </div>
-          <RadioGroup value={extractType} onValueChange={setExtractType}>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
-              <Label htmlFor="groups">Extract Groups</Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
-              <Label htmlFor="contacts">Extract Contacts</Label>
-            </div>
-          </RadioGroup>
-          {showValidationInput && (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Telegram Extractor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="validation-code">Validation Code</Label>
+              <Label htmlFor="api-id">API ID</Label>
               <Input
-                id="validation-code"
-                value={validationCode}
-                onChange={(e) => setValidationCode(e.target.value)}
+                id="api-id"
+                value={apiId}
+                onChange={(e) => setApiId(e.target.value)}
                 required
                 disabled={isLoading}
-                placeholder="Enter the code sent to your Telegram app"
+                placeholder="Enter your API ID"
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="api-hash">API Hash</Label>
+              <Input
+                id="api-hash"
+                value={apiHash}
+                onChange={(e) => setApiHash(e.target.value)}
+                required
+                disabled={isLoading}
+                placeholder="Enter your API Hash"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                required
+                disabled={isLoading}
+                placeholder="Enter your phone number (with country code)"
+              />
+            </div>
+            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading} />
+                <Label htmlFor="groups">Extract Groups</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading} />
+                <Label htmlFor="contacts">Extract Contacts</Label>
+              </div>
+            </RadioGroup>
+            {showValidationInput && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the code sent to your Telegram app"
+                />
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (showValidationInput ? 'Verify Code' : 'Request Code')}
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (showValidationInput ? 'Verify Code' : 'Request Code')}
-          </Button>
-        </form>
-        {error && (
-          <Alert variant="destructive" className="mt-4">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
-
-export default TelegramManager;
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
 
 
 
@@ -1272,6 +1370,7 @@ File: /src/lib/apiUtils.js
 
 import { FloodWaitError, errors } from 'telegram';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 const MAX_REQUESTS_PER_MINUTE = 20;
 const MAX_BACKOFF_TIME = 60000; // 1 minute
@@ -1279,6 +1378,11 @@ const MAX_BACKOFF_TIME = 60000; // 1 minute
 let requestCount = 0;
 let lastRequestTime = Date.now();
 let backoffTime = 2000; // Start with 2 seconds
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export function checkRateLimit() {
   const currentTime = Date.now();
@@ -1436,6 +1540,31 @@ export function cn(...classes) {
     return classes.filter(Boolean).join(" ");
   }
   
+
+
+---
+File: /utils/config.js
+---
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://tg-groups-contacts-managerv2.vercel.app/api';
+
+export { API_BASE_URL };
+
+
+
+---
+File: /.eslintrc.js
+---
+
+module.exports = {
+    extends: ['next/core-web-vitals'],
+    rules: {
+      // Disable TypeScript-specific rules
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/explicit-module-boundary-types': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  }
 
 
 ---
@@ -1637,12 +1766,23 @@ File: /next.config.js
 module.exports = {
     reactStrictMode: true,
     env: {
-        NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
     },
-};
-
+    // Add this section to ignore type checking during build
+    typescript: {
+      // !! WARN !!
+      // Dangerously allow production builds to successfully complete even if
+      // your project has type errors.
+      // !! WARN !!
+      ignoreBuildErrors: true,
+    },
+    // Add this to allow the use of top-level await in your application
+    experimental: {
+      esmExternals: 'loose',
+    },
+  }
 
 
 ---
@@ -1666,13 +1806,14 @@ File: /package.json
     "node": ">=14.0.0"
   },
   "dependencies": {
+    "@mtproto/core": "^6.3.0",
     "@radix-ui/react-checkbox": "^1.0.4",
     "@radix-ui/react-icons": "^1.3.0",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-radio-group": "^1.1.3",
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-tabs": "^1.0.4",
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.45.4",
     "class-variance-authority": "^0.7.0",
     "csv-stringify": "^6.4.4",
     "date-fns": "^2.30.0",
@@ -1687,6 +1828,7 @@ File: /package.json
   },
   "devDependencies": {
     "autoprefixer": "^10.4.16",
+    "eslint": "^8.0.0",
     "postcss": "^8.4.31",
     "tailwindcss": "^3.3.5"
   }
