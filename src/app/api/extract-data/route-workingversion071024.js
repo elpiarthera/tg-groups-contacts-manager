@@ -52,40 +52,29 @@ export async function POST(req) {
     }
 
     // Check if user exists, if not create a new user in Supabase
-    let user;
-    try {
-      let { data, error: userError } = await supabase
+    let { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (userError && userError.code === 'PGRST116') {
+      // User not found, create a new user
+      const { data: newUser, error: createError } = await supabase
         .from('users')
-        .select('*')
-        .eq('phone_number', validPhoneNumber)
+        .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
+        .select()
         .single();
 
-      if (userError && userError.code === 'PGRST116') {
-        // User not found, create a new user
-        const { data: newUser, error: createError } = await supabase
-          .from('users')
-          .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
-          .select()
-          .single();
-
-        if (createError) {
-          throw createError;
-        }
-        user = newUser;
-        console.log('[DEBUG]: New user created:', user.id);
-      } else if (userError) {
-        throw userError;
-      } else {
-        user = data;
+      if (createError) {
+        console.error('[USER CREATE ERROR]:', createError);
+        throw createError;
       }
-    } catch (error) {
-      console.error('[USER ERROR]:', error);
-      return handleErrorResponse('Error processing user data. Please try again.', 500);
-    }
-
-    // Ensure user is defined before proceeding
-    if (!user) {
-      return handleErrorResponse('User could not be created or fetched. Please try again later.', 500);
+      user = newUser;
+      console.log('[DEBUG]: New user created:', user.id);
+    } else if (userError) {
+      console.error('[USER FETCH ERROR]:', userError);
+      throw userError;
     }
 
     // Step 1: Request validation code if not provided
@@ -244,9 +233,6 @@ export async function POST(req) {
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
-  } finally {
-    if (client) {
-      await client.disconnect();
-    }
   }
+  // Note: We've removed the client disconnect logic as requested
 }

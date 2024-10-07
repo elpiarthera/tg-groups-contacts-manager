@@ -20,24 +20,17 @@ export default function TelegramManager() {
   const [isLoading, setIsLoading] = useState(false)
   const [codeRequestTime, setCodeRequestTime] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(120)
 
   useEffect(() => {
-    let timer
     if (showValidationInput && codeRequestTime) {
-      timer = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
-        const remaining = Math.max(120 - elapsed, 0)
-        setTimeRemaining(remaining)
-        if (remaining === 0) {
-          setError('Code expired. Please request a new one.')
-          setShowValidationInput(false)
-          setValidationCode('')
-          setCodeRequestTime(null)
-        }
-      }, 1000)
+      const timer = setTimeout(() => {
+        setError('Code expired. Please request a new one.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
+      }, 120000) // 2 minutes expiration
+      return () => clearTimeout(timer)
     }
-    return () => clearInterval(timer)
   }, [showValidationInput, codeRequestTime])
 
   const validateInputs = () => {
@@ -97,8 +90,7 @@ export default function TelegramManager() {
 
       if (data.requiresValidation) {
         setShowValidationInput(true)
-        setCodeRequestTime(Date.now())
-        setTimeRemaining(120)
+        setCodeRequestTime(new Date())
         setError(null)
         alert('Please enter the validation code sent to your Telegram app.')
       } else if (data.success) {
@@ -119,12 +111,6 @@ export default function TelegramManager() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  const renderTimer = () => {
-    const minutes = Math.floor(timeRemaining / 60)
-    const seconds = timeRemaining % 60
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
   return (
@@ -190,7 +176,6 @@ export default function TelegramManager() {
                   disabled={isLoading}
                   placeholder="Enter the code sent to your Telegram app"
                 />
-                <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
               </div>
             )}
             <Button type="submit" className="w-full" disabled={isLoading}>
