@@ -68,7 +68,7 @@ export async function POST(req) {
         );
         console.log('[SUCCESS]: Validation code requested successfully');
         
-        // Store phoneCodeHash in Supabase
+        // Check if user already exists
         const { data: existingUser, error: fetchError } = await supabase
           .from('users')
           .select('*')
@@ -89,14 +89,29 @@ export async function POST(req) {
           phone_registered: result.phone_registered !== false
         };
 
-        const { error: upsertError } = await supabase
-          .from('users')
-          .upsert(userData)
-          .eq('phone_number', validPhoneNumber);
+        let upsertResult;
+        if (existingUser) {
+          // Update existing user
+          const { data, error } = await supabase
+            .from('users')
+            .update(userData)
+            .eq('phone_number', validPhoneNumber)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        } else {
+          // Insert new user
+          const { data, error } = await supabase
+            .from('users')
+            .insert(userData)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        }
 
-        if (upsertError) {
-          console.error('[UPSERT ERROR]:', upsertError);
-          throw upsertError;
+        if (upsertResult.error) {
+          console.error('[UPSERT ERROR]:', upsertResult.error);
+          throw upsertResult.error;
         }
 
         console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
@@ -109,6 +124,9 @@ export async function POST(req) {
         });
       } catch (error) {
         console.error('[SEND CODE ERROR]:', error);
+        if (error.code === '23505') {
+          return handleErrorResponse('This phone number is already registered. Please use a different number or try again later.', 409);
+        }
         return handleTelegramError(error);
       }
     }
@@ -122,7 +140,7 @@ export async function POST(req) {
 
     if (fetchError) {
       console.error('[FETCH ERROR]:', fetchError);
-      throw fetchError;
+      return handleErrorResponse('User not found. Please request a new code.', 404);
     }
 
     console.log('[DEBUG]: Retrieved user data:', userData);

@@ -19,12 +19,12 @@ export default function TelegramManager() {
   const [validationCode, setValidationCode] = useState('')
   const [showValidationInput, setShowValidationInput] = useState(false)
   const [error, setError] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [codeRequestTime, setCodeRequestTime] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
   const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
-  const [successMessage, setSuccessMessage] = useState(null)
 
   useEffect(() => {
     let timer
@@ -97,6 +97,9 @@ export default function TelegramManager() {
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error('This phone number is already registered. Please use a different number or try again later.');
+        }
         throw new Error(data.error?.message || 'Failed to process request')
       }
 
@@ -105,7 +108,7 @@ export default function TelegramManager() {
         setCodeRequestTime(Date.now())
         setTimeRemaining(CODE_EXPIRATION_TIME)
         setIsPhoneRegistered(data.phoneRegistered)
-        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+        setSuccessMessage(`Validation code sent to your phone. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
       } else if (data.success) {
         if (showValidationInput) {
           setIsAuthenticated(true)
