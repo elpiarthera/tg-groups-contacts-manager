@@ -24,6 +24,7 @@ export default function TelegramManager() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
   const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
 
   useEffect(() => {
     let timer
@@ -62,6 +63,7 @@ export default function TelegramManager() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError(null)
+    setSuccessMessage(null)
     setIsLoading(true)
 
     if (!validateInputs()) {
@@ -103,17 +105,15 @@ export default function TelegramManager() {
         setCodeRequestTime(Date.now())
         setTimeRemaining(CODE_EXPIRATION_TIME)
         setIsPhoneRegistered(data.phoneRegistered)
-        setError(null)
-        alert(`Please enter the validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
       } else if (data.success) {
         if (showValidationInput) {
           setIsAuthenticated(true)
           setShowValidationInput(false)
-          setError(null)
-          alert('Authentication successful. You can now extract data.')
+          setSuccessMessage('Authentication successful. You can now extract data.')
         } else if (data.data) {
-          alert(`Extracted ${data.data.length} ${extractType}`)
-          router.push(`/${extractType}-list`)
+          setSuccessMessage(`Extracted ${data.data.length} ${extractType}`)
+          setTimeout(() => router.push(`/${extractType}-list`), 2000)
         }
       } else if (data.code === 'PHONE_CODE_EXPIRED') {
         setError('The verification code has expired. Please request a new code.')
@@ -220,10 +220,10 @@ export default function TelegramManager() {
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
-          {isAuthenticated && !error && (
+          {successMessage && (
             <Alert className="mt-4">
               <AlertTitle>Success</AlertTitle>
-              <AlertDescription>You are authenticated. You can now extract data.</AlertDescription>
+              <AlertDescription>{successMessage}</AlertDescription>
             </Alert>
           )}
         </CardContent>
