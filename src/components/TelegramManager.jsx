@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
+const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
+
 export default function TelegramManager() {
   const router = useRouter()
   const [apiId, setApiId] = useState('')
@@ -20,14 +22,15 @@ export default function TelegramManager() {
   const [isLoading, setIsLoading] = useState(false)
   const [codeRequestTime, setCodeRequestTime] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [timeRemaining, setTimeRemaining] = useState(120)
+  const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
+  const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
 
   useEffect(() => {
     let timer
     if (showValidationInput && codeRequestTime) {
       timer = setInterval(() => {
         const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
-        const remaining = Math.max(120 - elapsed, 0)
+        const remaining = Math.max(CODE_EXPIRATION_TIME - elapsed, 0)
         setTimeRemaining(remaining)
         if (remaining === 0) {
           setError('Code expired. Please request a new one.')
@@ -98,9 +101,10 @@ export default function TelegramManager() {
       if (data.requiresValidation) {
         setShowValidationInput(true)
         setCodeRequestTime(Date.now())
-        setTimeRemaining(120)
+        setTimeRemaining(CODE_EXPIRATION_TIME)
+        setIsPhoneRegistered(data.phoneRegistered)
         setError(null)
-        alert('Please enter the validation code sent to your Telegram app.')
+        alert(`Please enter the validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
       } else if (data.success) {
         if (showValidationInput) {
           setIsAuthenticated(true)
@@ -110,6 +114,11 @@ export default function TelegramManager() {
           alert(`Extracted ${data.data.length} ${extractType}`)
           router.push(`/${extractType}-list`)
         }
+      } else if (data.code === 'PHONE_CODE_EXPIRED') {
+        setError('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
       } else {
         setError(data.message || 'An unexpected error occurred. Please try again.')
       }
@@ -191,6 +200,11 @@ export default function TelegramManager() {
                   placeholder="Enter the code sent to your Telegram app"
                 />
                 <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
+                {isPhoneRegistered !== null && (
+                  <p className="text-sm text-blue-500">
+                    {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
+                  </p>
+                )}
               </div>
             )}
             <Button type="submit" className="w-full" disabled={isLoading}>

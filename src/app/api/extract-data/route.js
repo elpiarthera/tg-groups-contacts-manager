@@ -10,6 +10,8 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+
 export async function POST(req) {
   let client;
   try {
@@ -37,11 +39,13 @@ export async function POST(req) {
 
     checkRateLimit();
 
+    // Initialize TelegramClient
     const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
       useWSS: true,
       timeout: 30000,
+      dev: false, // Ensure we're using the production DC
     });
 
     console.log('[PROCESS]: Connecting to Telegram');
@@ -49,43 +53,6 @@ export async function POST(req) {
 
     if (!client.connected) {
       throw new Error('Failed to connect to Telegram');
-    }
-
-    // Check if user exists, if not create a new user in Supabase
-    let user;
-    try {
-      let { data, error: userError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('phone_number', validPhoneNumber)
-        .single();
-
-      if (userError && userError.code === 'PGRST116') {
-        // User not found, create a new user
-        const { data: newUser, error: createError } = await supabase
-          .from('users')
-          .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
-          .select()
-          .single();
-
-        if (createError) {
-          throw createError;
-        }
-        user = newUser;
-        console.log('[DEBUG]: New user created:', user.id);
-      } else if (userError) {
-        throw userError;
-      } else {
-        user = data;
-      }
-    } catch (error) {
-      console.error('[USER ERROR]:', error);
-      return handleErrorResponse('Error processing user data. Please try again.', 500);
-    }
-
-    // Ensure user is defined before proceeding
-    if (!user) {
-      return handleErrorResponse('User could not be created or fetched. Please try again later.', 500);
     }
 
     // Step 1: Request validation code if not provided
@@ -104,11 +71,13 @@ export async function POST(req) {
         // Store phoneCodeHash in Supabase
         const { error: updateError } = await supabase
           .from('users')
-          .update({ 
+          .upsert({ 
+            phone_number: validPhoneNumber,
             phoneCodeHash: result.phoneCodeHash, 
-            code_request_time: new Date().toISOString() 
+            code_request_time: new Date().toISOString(),
+            phone_registered: result.phone_registered !== false // Convert to boolean
           })
-          .eq('id', user.id);
+          .eq('phone_number', validPhoneNumber);
 
         if (updateError) {
           console.error('[UPDATE ERROR]:', updateError);
@@ -121,6 +90,7 @@ export async function POST(req) {
           success: true,
           message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
+          phoneRegistered: result.phone_registered !== false
         });
       } catch (error) {
         console.error('[SEND CODE ERROR]:', error);
@@ -128,11 +98,11 @@ export async function POST(req) {
       }
     }
 
-    // Retrieve phoneCodeHash from Supabase
+    // Retrieve user data from Supabase
     const { data: userData, error: fetchError } = await supabase
       .from('users')
-      .select('phoneCodeHash, code_request_time')
-      .eq('id', user.id)
+      .select('phoneCodeHash, code_request_time, phone_registered')
+      .eq('phone_number', validPhoneNumber)
       .single();
 
     if (fetchError) {
@@ -142,17 +112,16 @@ export async function POST(req) {
 
     console.log('[DEBUG]: Retrieved user data:', userData);
 
-    const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
+    const { phoneCodeHash, code_request_time: codeRequestTime, phone_registered: phoneRegistered } = userData;
 
     if (!phoneCodeHash || !codeRequestTime) {
       return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
     }
 
     // Check if the code has expired
-    const codeRequestDate = new Date(codeRequestTime);
-    const currentTime = new Date();
-    const timeDifference = currentTime - codeRequestDate;
-    if (timeDifference > 120000) { // 2 minutes
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > CODE_EXPIRATION_TIME) {
       return NextResponse.json({
         success: false,
         message: 'The verification code has expired. Please request a new code.',
@@ -160,20 +129,39 @@ export async function POST(req) {
       });
     }
 
-    // Step 2: Sign in with the provided validation code and extract data
-    console.log('[PROCESS]: Attempting to sign in with provided code');
+    // Step 2: Sign in or Sign up with the provided validation code
+    console.log('[PROCESS]: Attempting to sign in/up with provided code');
     try {
-      const signInResult = await client.invoke(new Api.auth.SignIn({
-        phoneNumber: validPhoneNumber,
-        phoneCodeHash: phoneCodeHash,
-        phoneCode: validationCode
-      }));
-
-      if (!signInResult.user) {
-        throw new Error('Failed to sign in. Please check your validation code and try again.');
+      let signInResult;
+      if (phoneRegistered) {
+        signInResult = await client.invoke(new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        }));
+      } else {
+        // If phone is not registered, use SignUp instead
+        signInResult = await client.invoke(new Api.auth.SignUp({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode,
+          firstName: 'New',
+          lastName: 'User'
+        }));
       }
 
-      console.log('[SUCCESS]: Signed in successfully');
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in/up. Please check your validation code and try again.');
+      }
+
+      console.log('[SUCCESS]: Signed in/up successfully');
+
+      // Save the session string
+      const sessionString = client.session.save();
+      await supabase
+        .from('users')
+        .update({ session_string: sessionString, phone_registered: true })
+        .eq('phone_number', validPhoneNumber);
 
       // Perform data extraction based on extractType
       let extractedData = [];
@@ -185,7 +173,7 @@ export async function POST(req) {
           participant_count: dialog.participantsCount || 0,
           type: dialog.isChannel ? 'channel' : 'group',
           is_public: !!dialog.username,
-          owner_id: user.id,
+          owner_id: validPhoneNumber,
         }));
       } else if (extractType === 'contacts') {
         const contacts = await client.getContacts();
@@ -196,7 +184,7 @@ export async function POST(req) {
           username: contact.username,
           phone_number: contact.phone,
           is_mutual_contact: contact.mutualContact,
-          owner_id: user.id,
+          owner_id: validPhoneNumber,
         }));
       } else {
         throw new Error('Invalid extract type specified');
@@ -218,7 +206,7 @@ export async function POST(req) {
       const { error: clearError } = await supabase
         .from('users')
         .update({ phoneCodeHash: null, code_request_time: null })
-        .eq('id', user.id);
+        .eq('phone_number', validPhoneNumber);
 
       if (clearError) {
         console.error('[CLEAR HASH ERROR]:', clearError);
@@ -228,10 +216,10 @@ export async function POST(req) {
       return NextResponse.json({
         success: true,
         message: `${extractType} extracted successfully`,
-        sessionString: client.session.save(),
+        data: extractedData,
       });
     } catch (error) {
-      console.error('[SIGN IN ERROR]:', error);
+      console.error('[SIGN IN/UP ERROR]:', error);
       if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
         return NextResponse.json({
           success: false,
