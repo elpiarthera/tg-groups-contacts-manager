@@ -109,6 +109,7 @@ export default function TelegramManager() {
         if (showValidationInput) {
           setIsAuthenticated(true)
           setShowValidationInput(false)
+          setError(null)
           alert('Authentication successful. You can now extract data.')
         } else if (data.data) {
           alert(`Extracted ${data.data.length} ${extractType}`)
@@ -217,6 +218,12 @@ export default function TelegramManager() {
             <Alert variant="destructive" className="mt-4">
               <AlertTitle>Error</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {isAuthenticated && !error && (
+            <Alert className="mt-4">
+              <AlertTitle>Success</AlertTitle>
+              <AlertDescription>You are authenticated. You can now extract data.</AlertDescription>
             </Alert>
           )}
         </CardContent>

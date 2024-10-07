@@ -69,19 +69,34 @@ export async function POST(req) {
         console.log('[SUCCESS]: Validation code requested successfully');
         
         // Store phoneCodeHash in Supabase
-        const { error: updateError } = await supabase
+        const { data: existingUser, error: fetchError } = await supabase
           .from('users')
-          .upsert({ 
-            phone_number: validPhoneNumber,
-            phoneCodeHash: result.phoneCodeHash, 
-            code_request_time: new Date().toISOString(),
-            phone_registered: result.phone_registered !== false // Convert to boolean
-          })
+          .select('*')
+          .eq('phone_number', validPhoneNumber)
+          .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error('[FETCH ERROR]:', fetchError);
+          throw fetchError;
+        }
+
+        const userData = {
+          phone_number: validPhoneNumber,
+          api_id: parseInt(apiId),
+          api_hash: apiHash,
+          phoneCodeHash: result.phoneCodeHash,
+          code_request_time: new Date().toISOString(),
+          phone_registered: result.phone_registered !== false
+        };
+
+        const { error: upsertError } = await supabase
+          .from('users')
+          .upsert(userData)
           .eq('phone_number', validPhoneNumber);
 
-        if (updateError) {
-          console.error('[UPDATE ERROR]:', updateError);
-          throw updateError;
+        if (upsertError) {
+          console.error('[UPSERT ERROR]:', upsertError);
+          throw upsertError;
         }
 
         console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
