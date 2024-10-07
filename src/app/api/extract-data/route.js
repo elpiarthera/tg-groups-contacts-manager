@@ -35,13 +35,15 @@ export async function POST(req) {
     const validPhoneNumber = phoneNumber.trim();
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
+    // Rate limit check
     checkRateLimit();
 
-    const stringSession = new StringSession('');
+    const stringSession = new StringSession(''); // Persist the session between requests
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
       useWSS: true,
       timeout: 30000,
+      dev: false, // Ensure production use
     });
 
     console.log('[PROCESS]: Connecting to Telegram');
@@ -51,52 +53,21 @@ export async function POST(req) {
       throw new Error('Failed to connect to Telegram');
     }
 
-    // Check if user exists, if not create a new user in Supabase
-    let { data: user, error: userError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('phone_number', validPhoneNumber)
-      .single();
-
-    if (userError && userError.code === 'PGRST116') {
-      // User not found, create a new user
-      const { data: newUser, error: createError } = await supabase
-        .from('users')
-        .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('[USER CREATE ERROR]:', createError);
-        throw createError;
-      }
-      user = newUser;
-      console.log('[DEBUG]: New user created:', user.id);
-    } else if (userError) {
-      console.error('[USER FETCH ERROR]:', userError);
-      throw userError;
-    }
-
     // Step 1: Request validation code if not provided
     if (!validationCode) {
       console.log('[PROCESS]: Requesting validation code');
       try {
-        const result = await client.sendCode(
-          {
-            apiId: parseInt(apiId),
-            apiHash: apiHash,
-          },
-          validPhoneNumber
-        );
+        const result = await client.sendCode({
+          apiId: parseInt(apiId),
+          apiHash: apiHash,
+        }, validPhoneNumber);
+
         console.log('[SUCCESS]: Validation code requested successfully');
-        
-        // Store phoneCodeHash in Supabase
+
+        // Store phoneCodeHash and request time in Supabase
         const { error: updateError } = await supabase
           .from('users')
-          .update({ 
-            phoneCodeHash: result.phoneCodeHash, 
-            code_request_time: new Date().toISOString() 
-          })
+          .update({ phoneCodeHash: result.phoneCodeHash, code_request_time: new Date().toISOString() })
           .eq('id', user.id);
 
         if (updateError) {
@@ -117,7 +88,7 @@ export async function POST(req) {
       }
     }
 
-    // Retrieve phoneCodeHash from Supabase
+    // Step 2: Retrieve phoneCodeHash and validate
     const { data: userData, error: fetchError } = await supabase
       .from('users')
       .select('phoneCodeHash, code_request_time')
@@ -137,11 +108,10 @@ export async function POST(req) {
       return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
     }
 
-    // Check if the code has expired
-    const codeRequestDate = new Date(codeRequestTime);
-    const currentTime = new Date();
-    const timeDifference = currentTime - codeRequestDate;
-    if (timeDifference > 120000) { // 2 minutes
+    // Check if the code has expired (using ms for accurate time comparison)
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > 120000) { // 2 minutes expiration
       return NextResponse.json({
         success: false,
         message: 'The verification code has expired. Please request a new code.',
@@ -149,13 +119,13 @@ export async function POST(req) {
       });
     }
 
-    // Step 2: Sign in with the provided validation code and extract data
+    // Step 3: Sign in with the provided validation code
     console.log('[PROCESS]: Attempting to sign in with provided code');
     try {
       const signInResult = await client.invoke(new Api.auth.SignIn({
         phoneNumber: validPhoneNumber,
         phoneCodeHash: phoneCodeHash,
-        phoneCode: validationCode
+        phoneCode: validationCode,
       }));
 
       if (!signInResult.user) {
@@ -234,5 +204,4 @@ export async function POST(req) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
   }
-  // Note: We've removed the client disconnect logic as requested
 }
