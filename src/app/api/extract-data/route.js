@@ -5,16 +5,6 @@ import { Api } from 'telegram/tl';
 import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
 import { createClient } from '@supabase/supabase-js';
 
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '1mb',
-    },
-    responseLimit: '8mb',
-  },
-  maxDuration: 60,
-};
-
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -42,7 +32,15 @@ async function getPersistentClient(apiId, apiHash, session = '') {
 export async function POST(req) {
   try {
     console.log('[START]: Handling API Request');
-    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = await req.json();
+    let body;
+    try {
+      body = await req.json();
+    } catch (error) {
+      console.error('[ERROR]: Failed to parse request body', error);
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+
+    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = body;
 
     console.log('[DEBUG]: Received payload:', { 
       apiId, apiHash, phoneNumber, extractType, action,
@@ -280,3 +278,7 @@ async function handleDataExtraction(client, phoneNumber, extractType) {
     data: extractedData,
   });
 }
+
+// Route segment config
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
