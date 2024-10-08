@@ -5,6 +5,16 @@ import { Api } from 'telegram/tl';
 import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
 import { createClient } from '@supabase/supabase-js';
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+    responseLimit: '8mb',
+  },
+  maxDuration: 60,
+};
+
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
