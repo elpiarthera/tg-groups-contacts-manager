@@ -42,9 +42,6 @@ export default function TelegramManager() {
               apiHash
             }),
           });
-          if (!response.ok) {
-            throw new Error('Failed to check session');
-          }
           const data = await response.json();
           setHasExistingSession(data.hasSession);
           if (data.hasSession) {
@@ -53,7 +50,6 @@ export default function TelegramManager() {
           }
         } catch (error) {
           console.error('Failed to check session:', error);
-          setError('Failed to check for existing session. Please try again.');
         } finally {
           setIsLoading(false);
         }
@@ -130,15 +126,19 @@ export default function TelegramManager() {
         body: JSON.stringify(payload),
       })
 
-      if (!response.ok) {
-        if (response.status === 503) {
-          throw new Error('Unable to connect to Telegram servers. Please try again later.');
-        }
-        throw new Error('Server returned an error. Please try again.');
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[ERROR]: Failed to parse JSON response:', jsonError);
+        throw new Error('Server returned an invalid response. Please try again.');
       }
 
-      const data = await response.json();
       console.log('[DEBUG]: Received response:', data)
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to process request')
+      }
 
       if (data.requiresValidation) {
         setShowValidationInput(true)
@@ -165,7 +165,7 @@ export default function TelegramManager() {
       }
     } catch (error) {
       console.error('[ERROR]: Submit failed:', error)
-      setError(error.message || 'An unexpected error occurred. Please try again.')
+      setError(error.message)
     } finally {
       setIsLoading(false)
     }

@@ -19,21 +19,12 @@ async function getPersistentClient(apiId, apiHash, session = '') {
   if (!persistentClient) {
     const stringSession = new StringSession(session);
     persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-      connectionRetries: 3,
+      connectionRetries: 5,
       useWSS: true,
-      timeout: 20000, // Reduced timeout to 20 seconds
-      dev: false,
+      timeout: 30000,
+      dev: false, // Ensure we're using the production DC
     });
-    try {
-      await Promise.race([
-        persistentClient.connect(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 25000))
-      ]);
-    } catch (error) {
-      console.error('[CONNECTION ERROR]:', error);
-      persistentClient = null;
-      throw error;
-    }
+    await persistentClient.connect();
   }
   return persistentClient;
 }
@@ -99,33 +90,25 @@ export async function POST(req) {
       return handleErrorResponse('Error retrieving user data. Please try again.', 500);
     }
 
-    try {
-      const client = await getPersistentClient(apiId, apiHash, userData?.session_string || '');
+    // Get or initialize the persistent TelegramClient
+    const client = await getPersistentClient(apiId, apiHash, userData?.session_string || '');
 
-      if (!client.connected) {
-        throw new Error('Failed to connect to Telegram');
-      }
-
-      // If we have a session and an extract type, proceed with extraction
-      if (userData?.session_string && extractType) {
-        return await handleDataExtraction(client, validPhoneNumber, extractType);
-      }
-
-      // Step 1: Request validation code if not provided
-      if (!validationCode) {
-        return await handleCodeRequest(client, apiId, apiHash, validPhoneNumber);
-      }
-
-      // Step 2: Sign in or Sign up with the provided validation code
-      return await handleSignInOrSignUp(client, validPhoneNumber, userData, validationCode, extractType);
-
-    } catch (error) {
-      console.error('[TELEGRAM CONNECTION ERROR]:', error);
-      return NextResponse.json({ 
-        error: 'Failed to connect to Telegram servers. Please try again later.',
-        details: error.message
-      }, { status: 503 });
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
     }
+
+    // If we have a session and an extract type, proceed with extraction
+    if (userData?.session_string && extractType) {
+      return await handleDataExtraction(client, validPhoneNumber, extractType);
+    }
+
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
+      return await handleCodeRequest(client, apiId, apiHash, validPhoneNumber);
+    }
+
+    // Step 2: Sign in or Sign up with the provided validation code
+    return await handleSignInOrSignUp(client, validPhoneNumber, userData, validationCode, extractType);
 
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
