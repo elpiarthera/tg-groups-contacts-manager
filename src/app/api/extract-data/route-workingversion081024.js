@@ -12,24 +12,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
 
-// Persistent TelegramClient instance
-let persistentClient;
-
-async function getPersistentClient(apiId, apiHash) {
-  if (!persistentClient) {
-    const stringSession = new StringSession('');
-    persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
-      connectionRetries: 5,
-      useWSS: true,
-      timeout: 30000,
-      dev: false, // Ensure we're using the production DC
-    });
-    await persistentClient.connect();
-  }
-  return persistentClient;
-}
-
 export async function POST(req) {
+  let client;
   try {
     console.log('[START]: Handling API Request');
     const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
@@ -55,8 +39,17 @@ export async function POST(req) {
 
     checkRateLimit();
 
-    // Get or initialize the persistent TelegramClient
-    const client = await getPersistentClient(apiId, apiHash);
+    // Initialize TelegramClient
+    const stringSession = new StringSession('');
+    client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+      dev: false, // Ensure we're using the production DC
+    });
+
+    console.log('[PROCESS]: Connecting to Telegram');
+    await client.connect();
 
     if (!client.connected) {
       throw new Error('Failed to connect to Telegram');
@@ -125,7 +118,7 @@ export async function POST(req) {
 
         return NextResponse.json({
           success: true,
-          message: 'Validation code sent to your Telegram app. Please provide it in the next step.',
+          message: 'Validation code sent to your phone. Please provide it in the next step.',
           requiresValidation: true,
           phoneRegistered: result.phone_registered !== false
         });
@@ -272,5 +265,9 @@ export async function POST(req) {
   } catch (error) {
     console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
     return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  } finally {
+    if (client) {
+      await client.disconnect();
+    }
   }
 }

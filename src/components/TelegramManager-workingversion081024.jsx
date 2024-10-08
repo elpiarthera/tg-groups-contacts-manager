@@ -108,7 +108,7 @@ export default function TelegramManager() {
         setCodeRequestTime(Date.now())
         setTimeRemaining(CODE_EXPIRATION_TIME)
         setIsPhoneRegistered(data.phoneRegistered)
-        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+        setSuccessMessage(`Validation code sent to your phone. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
       } else if (data.success) {
         if (showValidationInput) {
           setIsAuthenticated(true)
@@ -204,9 +204,6 @@ export default function TelegramManager() {
                   placeholder="Enter the code sent to your Telegram app"
                 />
                 <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
-                <p className="text-sm text-blue-500">
-                  Please check your Telegram app for the verification code.
-                </p>
                 {isPhoneRegistered !== null && (
                   <p className="text-sm text-blue-500">
                     {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
