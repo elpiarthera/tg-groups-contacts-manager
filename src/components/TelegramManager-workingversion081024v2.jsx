@@ -25,39 +25,6 @@ export default function TelegramManager() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
   const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
-  const [hasExistingSession, setHasExistingSession] = useState(false)
-
-  useEffect(() => {
-    const checkExistingSession = async () => {
-      if (phoneNumber && apiId && apiHash) {
-        setIsLoading(true)
-        try {
-          const response = await fetch('/api/extract-data', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              action: 'checkSession', 
-              phoneNumber: phoneNumber.trim(),
-              apiId: parseInt(apiId),
-              apiHash
-            }),
-          });
-          const data = await response.json();
-          setHasExistingSession(data.hasSession);
-          if (data.hasSession) {
-            setIsAuthenticated(true);
-            setSuccessMessage('You have an existing session. You can proceed with data extraction.');
-          }
-        } catch (error) {
-          console.error('Failed to check session:', error);
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    checkExistingSession();
-  }, [phoneNumber, apiId, apiHash]);
 
   useEffect(() => {
     let timer
@@ -126,18 +93,14 @@ export default function TelegramManager() {
         body: JSON.stringify(payload),
       })
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (jsonError) {
-        console.error('[ERROR]: Failed to parse JSON response:', jsonError);
-        throw new Error('Server returned an invalid response. Please try again.');
-      }
-
+      const data = await response.json()
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process request')
+        if (response.status === 409) {
+          throw new Error('This phone number is already registered. Please use a different number or try again later.');
+        }
+        throw new Error(data.error?.message || 'Failed to process request')
       }
 
       if (data.requiresValidation) {
@@ -147,7 +110,7 @@ export default function TelegramManager() {
         setIsPhoneRegistered(data.phoneRegistered)
         setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
       } else if (data.success) {
-        if (showValidationInput || hasExistingSession) {
+        if (showValidationInput) {
           setIsAuthenticated(true)
           setShowValidationInput(false)
           setSuccessMessage('Authentication successful. You can now extract data.')
@@ -229,7 +192,7 @@ export default function TelegramManager() {
                 <Label htmlFor="contacts">Extract Contacts</Label>
               </div>
             </RadioGroup>
-            {showValidationInput && !hasExistingSession && (
+            {showValidationInput && (
               <div className="space-y-2">
                 <Label htmlFor="validation-code">Validation Code</Label>
                 <Input
