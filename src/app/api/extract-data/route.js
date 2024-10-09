@@ -90,7 +90,7 @@ export async function POST(req) {
     // Retrieve user data from Supabase
     const { data: userData, error: fetchError } = await supabase
       .from('users')
-      .select('session_string, phoneCodeHash, code_request_time, phone_registered')
+      .select('id, session_string, phoneCodeHash, code_request_time, phone_registered')
       .eq('phone_number', validPhoneNumber)
       .single();
 
@@ -108,7 +108,7 @@ export async function POST(req) {
 
       // If we have a session and an extract type, proceed with extraction
       if (userData?.session_string && extractType) {
-        return await handleDataExtraction(client, validPhoneNumber, extractType);
+        return await handleDataExtraction(client, validPhoneNumber, extractType, userData.id);
       }
 
       // Step 1: Request validation code if not provided
@@ -229,7 +229,7 @@ async function handleSignInOrSignUp(client, phoneNumber, userData, validationCod
       .eq('phone_number', phoneNumber);
 
     if (extractType) {
-      return await handleDataExtraction(client, phoneNumber, extractType);
+      return await handleDataExtraction(client, phoneNumber, extractType, userData.id);
     }
 
     return NextResponse.json({
@@ -250,7 +250,7 @@ async function handleSignInOrSignUp(client, phoneNumber, userData, validationCod
   }
 }
 
-async function handleDataExtraction(client, phoneNumber, extractType) {
+async function handleDataExtraction(client, phoneNumber, extractType, userId) {
   let extractedData = [];
   try {
     if (extractType === 'groups') {
@@ -261,7 +261,7 @@ async function handleDataExtraction(client, phoneNumber, extractType) {
         participant_count: dialog.participantsCount || 0,
         type: dialog.isChannel ? 'channel' : 'group',
         is_public: !!dialog.username,
-        owner_id: phoneNumber,
+        owner_id: userId,
       }));
     } else if (extractType === 'contacts') {
       const result = await client.invoke(new Api.contacts.GetContacts({
@@ -273,8 +273,7 @@ async function handleDataExtraction(client, phoneNumber, extractType) {
         last_name: user.lastName,
         username: user.username,
         phone_number: user.phone,
-        is_mutual_contact: user.mutualContact,
-        owner_id: phoneNumber,
+        owner_id: userId,
       }));
     } else {
       throw new Error('Invalid extract type specified');
