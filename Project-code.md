@@ -1,6 +1,8 @@
 Directory Structure:
 
 └── ./
+    ├── .vercel
+    │   └── project.json
     ├── src
     │   ├── app
     │   │   ├── api
@@ -8,6 +10,10 @@ Directory Structure:
     │   │   │   │   └── telegram
     │   │   │   │       └── route.js
     │   │   │   └── extract-data
+    │   │   │       ├── route-workingversion071024.js
+    │   │   │       ├── route-workingversion081024.js
+    │   │   │       ├── route-workingversion081024v2.js
+    │   │   │       ├── route-workingversion081024v3.js
     │   │   │       └── route.js
     │   │   ├── contacts
     │   │   │   └── page.js
@@ -38,6 +44,10 @@ Directory Structure:
     │   │   ├── ClientTelegramManager.js
     │   │   ├── ContactsList.jsx
     │   │   ├── GroupsList.jsx
+    │   │   ├── TelegramManager-workingversion071024.jsx
+    │   │   ├── TelegramManager-workingversion081024.jsx
+    │   │   ├── TelegramManager-workingversion081024v2.jsx
+    │   │   ├── TelegramManager-workingversion081024v3.jsx
     │   │   └── TelegramManager.jsx
     │   └── lib
     │       ├── apiUtils.js
@@ -54,10 +64,33 @@ Directory Structure:
     ├── next.config.js
     ├── package.json
     ├── postcss.config.js
+    ├── project-process.md
     ├── route-working.js
     ├── tailwind.config.js
     ├── TelegramManager-working.jsx
     └── vercel.json
+
+
+
+---
+File: /.vercel/project.json
+---
+
+{
+  "projectId": "prj_367vtzPiZn5QirP92psBaoa7hv06",
+  "orgId": "team_ArZ7x4AdcyPVl4hDW9jRBNul",
+  "settings": {
+    "createdAt": 1727471692304,
+    "framework": null,
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "20.x"
+  }
+}
 
 
 
@@ -119,7 +152,7 @@ export async function POST(req) {
 
 
 ---
-File: /src/app/api/extract-data/route.js
+File: /src/app/api/extract-data/route-workingversion071024.js
 ---
 
 import { NextResponse } from 'next/server';
@@ -147,13 +180,13 @@ export async function POST(req) {
 
     // Input Validation
     if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
-      return handleErrorResponse('API ID is invalid or missing.', 400);
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
     }
     if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
-      return handleErrorResponse('API Hash is invalid.', 400);
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
     }
-    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
-      return handleErrorResponse('Phone number is missing or invalid.', 400);
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
     }
 
     const validPhoneNumber = phoneNumber.trim();
@@ -161,143 +194,1368 @@ export async function POST(req) {
 
     checkRateLimit();
 
-    // Retrieve existing session from Supabase if available
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('session_string')
-      .eq('phone_number', validPhoneNumber)
-      .single();
-
-    const stringSession = new StringSession(userData?.session_string || '');
+    const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 5,
       useWSS: true,
       timeout: 30000,
     });
 
-    console.log('[DEBUG]: Connecting to Telegram...');
+    console.log('[PROCESS]: Connecting to Telegram');
     await client.connect();
-    console.log('[DEBUG]: Connected to Telegram');
 
-    if (!client.isUserAuthorized()) {
-      if (!validationCode) {
-        console.log('[DEBUG]: Requesting phone code...');
-        try {
-          const result = await client.sendCode({
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
+
+    // Check if user exists, if not create a new user in Supabase
+    let { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (userError && userError.code === 'PGRST116') {
+      // User not found, create a new user
+      const { data: newUser, error: createError } = await supabase
+        .from('users')
+        .insert({ phone_number: validPhoneNumber, api_id: apiId, api_hash: apiHash })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error('[USER CREATE ERROR]:', createError);
+        throw createError;
+      }
+      user = newUser;
+      console.log('[DEBUG]: New user created:', user.id);
+    } else if (userError) {
+      console.error('[USER FETCH ERROR]:', userError);
+      throw userError;
+    }
+
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
+      console.log('[PROCESS]: Requesting validation code');
+      try {
+        const result = await client.sendCode(
+          {
             apiId: parseInt(apiId),
-            apiHash,
-            phone: validPhoneNumber,
-          });
-          console.log('[DEBUG]: Phone code requested successfully');
-
-          // Store the phone code hash in Supabase
-          const { error } = await supabase
-            .from('users')
-            .upsert({ 
-              phone_number: validPhoneNumber,
-              phoneCodeHash: result.phoneCodeHash,
-              code_request_time: new Date().toISOString()
-            });
-
-          if (error) {
-            console.error('[ERROR]: Error storing phone code hash:', error);
-            return handleErrorResponse('Error storing phone code hash', 500);
-          }
-
-          return NextResponse.json({ 
-            success: true, 
-            message: 'Validation code sent. Please check your Telegram app.',
-            requiresValidation: true
-          });
-        } catch (error) {
-          console.error('[ERROR]: Failed to send code:', error);
-          return handleTelegramError(error);
-        }
-      } else {
-        // Validation code provided, proceed with sign in
-        console.log('[DEBUG]: Proceeding with code validation');
-
-        const { data: userData, error: userError } = await supabase
+            apiHash: apiHash,
+          },
+          validPhoneNumber
+        );
+        console.log('[SUCCESS]: Validation code requested successfully');
+        
+        // Store phoneCodeHash in Supabase
+        const { error: updateError } = await supabase
           .from('users')
-          .select('phoneCodeHash')
-          .eq('phone_number', validPhoneNumber)
-          .single();
+          .update({ 
+            phoneCodeHash: result.phoneCodeHash, 
+            code_request_time: new Date().toISOString() 
+          })
+          .eq('id', user.id);
 
-        if (userError) {
-          console.error('[ERROR]: Error fetching user data:', userError);
-          return handleErrorResponse('Error fetching user data', 500);
+        if (updateError) {
+          console.error('[UPDATE ERROR]:', updateError);
+          throw updateError;
         }
 
-        const { phoneCodeHash } = userData;
+        console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
 
-        if (!phoneCodeHash) {
-          return handleErrorResponse('Phone code hash not found. Please request a new code.', 400);
-        }
-
-        try {
-          await client.invoke(
-            new Api.auth.SignIn({
-              phoneNumber: validPhoneNumber,
-              phoneCodeHash: phoneCodeHash,
-              phoneCode: validationCode
-            })
-          );
-          console.log('[DEBUG]: Sign in successful');
-          
-          // Save the session string
-          const sessionString = client.session.save();
-          await supabase
-            .from('users')
-            .update({ session_string: sessionString })
-            .eq('phone_number', validPhoneNumber);
-        } catch (error) {
-          console.error('[ERROR]: Sign in failed:', error);
-          return handleTelegramError(error);
-        }
+        return NextResponse.json({
+          success: true,
+          message: 'Validation code sent to your phone. Please provide it in the next step.',
+          requiresValidation: true,
+        });
+      } catch (error) {
+        console.error('[SEND CODE ERROR]:', error);
+        return handleTelegramError(error);
       }
     }
 
-    // Proceed with data extraction
-    console.log('[DEBUG]: Proceeding with data extraction');
-    let extractedData = [];
-    if (extractType === 'groups') {
-      extractedData = await extractGroups(client);
-    } else if (extractType === 'contacts') {
-      extractedData = await extractContacts(client);
+    // Retrieve phoneCodeHash from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('phoneCodeHash, code_request_time')
+      .eq('id', user.id)
+      .single();
+
+    if (fetchError) {
+      console.error('[FETCH ERROR]:', fetchError);
+      throw fetchError;
     }
 
-    console.log('[DEBUG]: Data extraction completed');
-    return NextResponse.json({ success: true, data: extractedData });
+    console.log('[DEBUG]: Retrieved user data:', userData);
 
+    const { phoneCodeHash, code_request_time: codeRequestTime } = userData;
+
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime);
+    const currentTime = new Date();
+    const timeDifference = currentTime - codeRequestDate;
+    if (timeDifference > 120000) { // 2 minutes
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+
+    // Step 2: Sign in with the provided validation code and extract data
+    console.log('[PROCESS]: Attempting to sign in with provided code');
+    try {
+      const signInResult = await client.invoke(new Api.auth.SignIn({
+        phoneNumber: validPhoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode
+      }));
+
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in. Please check your validation code and try again.');
+      }
+
+      console.log('[SUCCESS]: Signed in successfully');
+
+      // Perform data extraction based on extractType
+      let extractedData = [];
+      if (extractType === 'groups') {
+        const dialogs = await client.getDialogs();
+        extractedData = dialogs.map(dialog => ({
+          group_name: dialog.title,
+          group_id: dialog.id.toString(),
+          participant_count: dialog.participantsCount || 0,
+          type: dialog.isChannel ? 'channel' : 'group',
+          is_public: !!dialog.username,
+          owner_id: user.id,
+        }));
+      } else if (extractType === 'contacts') {
+        const contacts = await client.getContacts();
+        extractedData = contacts.map(contact => ({
+          user_id: contact.id.toString(),
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+          username: contact.username,
+          phone_number: contact.phone,
+          is_mutual_contact: contact.mutualContact,
+          owner_id: user.id,
+        }));
+      } else {
+        throw new Error('Invalid extract type specified');
+      }
+
+      console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+      // Insert extracted data into Supabase
+      const { error: insertError } = await supabase
+        .from(extractType)
+        .insert(extractedData);
+
+      if (insertError) {
+        console.error('[INSERT ERROR]:', insertError);
+        throw insertError;
+      }
+
+      // Clear the phoneCodeHash after successful sign-in
+      const { error: clearError } = await supabase
+        .from('users')
+        .update({ phoneCodeHash: null, code_request_time: null })
+        .eq('id', user.id);
+
+      if (clearError) {
+        console.error('[CLEAR HASH ERROR]:', clearError);
+        // Not throwing here as it's not critical
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `${extractType} extracted successfully`,
+        sessionString: client.session.save(),
+      });
+    } catch (error) {
+      console.error('[SIGN IN ERROR]:', error);
+      if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
+      }
+      return handleTelegramError(error);
+    }
   } catch (error) {
-    console.error('[ERROR]: An unexpected error occurred:', error);
-    return handleErrorResponse('An unexpected error occurred', 500, error);
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  }
+  // Note: We've removed the client disconnect logic as requested
+}
+
+
+
+---
+File: /src/app/api/extract-data/route-workingversion081024.js
+---
+
+import { NextResponse } from 'next/server';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
+import { Api } from 'telegram/tl';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+export async function POST(req) {
+  let client;
+  try {
+    console.log('[START]: Handling API Request');
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
+
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, apiHash, phoneNumber, extractType, 
+      validationCode: validationCode ? 'Provided' : 'Not provided',
+    });
+
+    // Input Validation
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+    }
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+    }
+
+    const validPhoneNumber = phoneNumber.trim();
+    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
+
+    checkRateLimit();
+
+    // Initialize TelegramClient
+    const stringSession = new StringSession('');
+    client = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+      dev: false, // Ensure we're using the production DC
+    });
+
+    console.log('[PROCESS]: Connecting to Telegram');
+    await client.connect();
+
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
+
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
+      console.log('[PROCESS]: Requesting validation code');
+      try {
+        const result = await client.sendCode(
+          {
+            apiId: parseInt(apiId),
+            apiHash: apiHash,
+          },
+          validPhoneNumber
+        );
+        console.log('[SUCCESS]: Validation code requested successfully');
+        
+        // Check if user already exists
+        const { data: existingUser, error: fetchError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', validPhoneNumber)
+          .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error('[FETCH ERROR]:', fetchError);
+          throw fetchError;
+        }
+
+        const userData = {
+          phone_number: validPhoneNumber,
+          api_id: parseInt(apiId),
+          api_hash: apiHash,
+          phoneCodeHash: result.phoneCodeHash,
+          code_request_time: new Date().toISOString(),
+          phone_registered: result.phone_registered !== false
+        };
+
+        let upsertResult;
+        if (existingUser) {
+          // Update existing user
+          const { data, error } = await supabase
+            .from('users')
+            .update(userData)
+            .eq('phone_number', validPhoneNumber)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        } else {
+          // Insert new user
+          const { data, error } = await supabase
+            .from('users')
+            .insert(userData)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        }
+
+        if (upsertResult.error) {
+          console.error('[UPSERT ERROR]:', upsertResult.error);
+          throw upsertResult.error;
+        }
+
+        console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
+
+        return NextResponse.json({
+          success: true,
+          message: 'Validation code sent to your phone. Please provide it in the next step.',
+          requiresValidation: true,
+          phoneRegistered: result.phone_registered !== false
+        });
+      } catch (error) {
+        console.error('[SEND CODE ERROR]:', error);
+        if (error.code === '23505') {
+          return handleErrorResponse('This phone number is already registered. Please use a different number or try again later.', 409);
+        }
+        return handleTelegramError(error);
+      }
+    }
+
+    // Retrieve user data from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('phoneCodeHash, code_request_time, phone_registered')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (fetchError) {
+      console.error('[FETCH ERROR]:', fetchError);
+      return handleErrorResponse('User not found. Please request a new code.', 404);
+    }
+
+    console.log('[DEBUG]: Retrieved user data:', userData);
+
+    const { phoneCodeHash, code_request_time: codeRequestTime, phone_registered: phoneRegistered } = userData;
+
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > CODE_EXPIRATION_TIME) {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+
+    // Step 2: Sign in or Sign up with the provided validation code
+    console.log('[PROCESS]: Attempting to sign in/up with provided code');
+    try {
+      let signInResult;
+      if (phoneRegistered) {
+        signInResult = await client.invoke(new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        }));
+      } else {
+        // If phone is not registered, use SignUp instead
+        signInResult = await client.invoke(new Api.auth.SignUp({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode,
+          firstName: 'New',
+          lastName: 'User'
+        }));
+      }
+
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in/up. Please check your validation code and try again.');
+      }
+
+      console.log('[SUCCESS]: Signed in/up successfully');
+
+      // Save the session string
+      const sessionString = client.session.save();
+      await supabase
+        .from('users')
+        .update({ session_string: sessionString, phone_registered: true })
+        .eq('phone_number', validPhoneNumber);
+
+      // Perform data extraction based on extractType
+      let extractedData = [];
+      if (extractType === 'groups') {
+        const dialogs = await client.getDialogs();
+        extractedData = dialogs.map(dialog => ({
+          group_name: dialog.title,
+          group_id: dialog.id.toString(),
+          participant_count: dialog.participantsCount || 0,
+          type: dialog.isChannel ? 'channel' : 'group',
+          is_public: !!dialog.username,
+          owner_id: validPhoneNumber,
+        }));
+      } else if (extractType === 'contacts') {
+        const contacts = await client.getContacts();
+        extractedData = contacts.map(contact => ({
+          user_id: contact.id.toString(),
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+          username: contact.username,
+          phone_number: contact.phone,
+          is_mutual_contact: contact.mutualContact,
+          owner_id: validPhoneNumber,
+        }));
+      } else {
+        throw new Error('Invalid extract type specified');
+      }
+
+      console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+      // Insert extracted data into Supabase
+      const { error: insertError } = await supabase
+        .from(extractType)
+        .insert(extractedData);
+
+      if (insertError) {
+        console.error('[INSERT ERROR]:', insertError);
+        throw insertError;
+      }
+
+      // Clear the phoneCodeHash after successful sign-in
+      const { error: clearError } = await supabase
+        .from('users')
+        .update({ phoneCodeHash: null, code_request_time: null })
+        .eq('phone_number', validPhoneNumber);
+
+      if (clearError) {
+        console.error('[CLEAR HASH ERROR]:', clearError);
+        // Not throwing here as it's not critical
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `${extractType} extracted successfully`,
+        data: extractedData,
+      });
+    } catch (error) {
+      console.error('[SIGN IN/UP ERROR]:', error);
+      if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
+      }
+      return handleTelegramError(error);
+    }
+  } catch (error) {
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
   } finally {
-    if (client && client.connected) {
+    if (client) {
       await client.disconnect();
-      console.log('[CLEANUP]: Telegram client disconnected successfully');
     }
   }
 }
 
-async function extractGroups(client) {
-  const dialogs = await client.getDialogs();
-  return dialogs.map(dialog => ({
-    id: dialog.id.toString(),
-    title: dialog.title,
-    isChannel: dialog.isChannel
-  }));
+
+
+---
+File: /src/app/api/extract-data/route-workingversion081024v2.js
+---
+
+import { NextResponse } from 'next/server';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
+import { Api } from 'telegram/tl';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+// Persistent TelegramClient instance
+let persistentClient;
+
+async function getPersistentClient(apiId, apiHash) {
+  if (!persistentClient) {
+    const stringSession = new StringSession('');
+    persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+      dev: false, // Ensure we're using the production DC
+    });
+    await persistentClient.connect();
+  }
+  return persistentClient;
 }
 
-async function extractContacts(client) {
-  const contacts = await client.getContacts();
-  return contacts.map(contact => ({
-    id: contact.id.toString(),
-    firstName: contact.firstName,
-    lastName: contact.lastName,
-    phone: contact.phone
-  }));
+export async function POST(req) {
+  try {
+    console.log('[START]: Handling API Request');
+    const { apiId, apiHash, phoneNumber, extractType, validationCode } = await req.json();
+
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, apiHash, phoneNumber, extractType, 
+      validationCode: validationCode ? 'Provided' : 'Not provided',
+    });
+
+    // Input Validation
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+    }
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+    }
+
+    const validPhoneNumber = phoneNumber.trim();
+    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
+
+    checkRateLimit();
+
+    // Get or initialize the persistent TelegramClient
+    const client = await getPersistentClient(apiId, apiHash);
+
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
+
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
+      console.log('[PROCESS]: Requesting validation code');
+      try {
+        const result = await client.sendCode(
+          {
+            apiId: parseInt(apiId),
+            apiHash: apiHash,
+          },
+          validPhoneNumber
+        );
+        console.log('[SUCCESS]: Validation code requested successfully');
+        
+        // Check if user already exists
+        const { data: existingUser, error: fetchError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('phone_number', validPhoneNumber)
+          .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error('[FETCH ERROR]:', fetchError);
+          throw fetchError;
+        }
+
+        const userData = {
+          phone_number: validPhoneNumber,
+          api_id: parseInt(apiId),
+          api_hash: apiHash,
+          phoneCodeHash: result.phoneCodeHash,
+          code_request_time: new Date().toISOString(),
+          phone_registered: result.phone_registered !== false
+        };
+
+        let upsertResult;
+        if (existingUser) {
+          // Update existing user
+          const { data, error } = await supabase
+            .from('users')
+            .update(userData)
+            .eq('phone_number', validPhoneNumber)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        } else {
+          // Insert new user
+          const { data, error } = await supabase
+            .from('users')
+            .insert(userData)
+            .select()
+            .single();
+          upsertResult = { data, error };
+        }
+
+        if (upsertResult.error) {
+          console.error('[UPSERT ERROR]:', upsertResult.error);
+          throw upsertResult.error;
+        }
+
+        console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
+
+        return NextResponse.json({
+          success: true,
+          message: 'Validation code sent to your Telegram app. Please provide it in the next step.',
+          requiresValidation: true,
+          phoneRegistered: result.phone_registered !== false
+        });
+      } catch (error) {
+        console.error('[SEND CODE ERROR]:', error);
+        if (error.code === '23505') {
+          return handleErrorResponse('This phone number is already registered. Please use a different number or try again later.', 409);
+        }
+        return handleTelegramError(error);
+      }
+    }
+
+    // Retrieve user data from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('phoneCodeHash, code_request_time, phone_registered')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (fetchError) {
+      console.error('[FETCH ERROR]:', fetchError);
+      return handleErrorResponse('User not found. Please request a new code.', 404);
+    }
+
+    console.log('[DEBUG]: Retrieved user data:', userData);
+
+    const { phoneCodeHash, code_request_time: codeRequestTime, phone_registered: phoneRegistered } = userData;
+
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > CODE_EXPIRATION_TIME) {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+
+    // Step 2: Sign in or Sign up with the provided validation code
+    console.log('[PROCESS]: Attempting to sign in/up with provided code');
+    try {
+      let signInResult;
+      if (phoneRegistered) {
+        signInResult = await client.invoke(new Api.auth.SignIn({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode
+        }));
+      } else {
+        // If phone is not registered, use SignUp instead
+        signInResult = await client.invoke(new Api.auth.SignUp({
+          phoneNumber: validPhoneNumber,
+          phoneCodeHash: phoneCodeHash,
+          phoneCode: validationCode,
+          firstName: 'New',
+          lastName: 'User'
+        }));
+      }
+
+      if (!signInResult.user) {
+        throw new Error('Failed to sign in/up. Please check your validation code and try again.');
+      }
+
+      console.log('[SUCCESS]: Signed in/up successfully');
+
+      // Save the session string
+      const sessionString = client.session.save();
+      await supabase
+        .from('users')
+        .update({ session_string: sessionString, phone_registered: true })
+        .eq('phone_number', validPhoneNumber);
+
+      // Perform data extraction based on extractType
+      let extractedData = [];
+      if (extractType === 'groups') {
+        const dialogs = await client.getDialogs();
+        extractedData = dialogs.map(dialog => ({
+          group_name: dialog.title,
+          group_id: dialog.id.toString(),
+          participant_count: dialog.participantsCount || 0,
+          type: dialog.isChannel ? 'channel' : 'group',
+          is_public: !!dialog.username,
+          owner_id: validPhoneNumber,
+        }));
+      } else if (extractType === 'contacts') {
+        const contacts = await client.getContacts();
+        extractedData = contacts.map(contact => ({
+          user_id: contact.id.toString(),
+          first_name: contact.firstName,
+          last_name: contact.lastName,
+          username: contact.username,
+          phone_number: contact.phone,
+          is_mutual_contact: contact.mutualContact,
+          owner_id: validPhoneNumber,
+        }));
+      } else {
+        throw new Error('Invalid extract type specified');
+      }
+
+      console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+      // Insert extracted data into Supabase
+      const { error: insertError } = await supabase
+        .from(extractType)
+        .insert(extractedData);
+
+      if (insertError) {
+        console.error('[INSERT ERROR]:', insertError);
+        throw insertError;
+      }
+
+      // Clear the phoneCodeHash after successful sign-in
+      const { error: clearError } = await supabase
+        .from('users')
+        .update({ phoneCodeHash: null, code_request_time: null })
+        .eq('phone_number', validPhoneNumber);
+
+      if (clearError) {
+        console.error('[CLEAR HASH ERROR]:', clearError);
+        // Not throwing here as it's not critical
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `${extractType} extracted successfully`,
+        data: extractedData,
+      });
+    } catch (error) {
+      console.error('[SIGN IN/UP ERROR]:', error);
+      if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+        return NextResponse.json({
+          success: false,
+          message: 'The verification code has expired. Please request a new code.',
+          code: 'PHONE_CODE_EXPIRED'
+        });
+      }
+      return handleTelegramError(error);
+    }
+  } catch (error) {
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  }
 }
+
+
+
+---
+File: /src/app/api/extract-data/route-workingversion081024v3.js
+---
+
+import { NextResponse } from 'next/server';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
+import { Api } from 'telegram/tl';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+// Persistent TelegramClient instance
+let persistentClient;
+
+async function getPersistentClient(apiId, apiHash, session = '') {
+  if (!persistentClient) {
+    const stringSession = new StringSession(session);
+    persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 5,
+      useWSS: true,
+      timeout: 30000,
+      dev: false, // Ensure we're using the production DC
+    });
+    await persistentClient.connect();
+  }
+  return persistentClient;
+}
+
+export async function POST(req) {
+  try {
+    console.log('[START]: Handling API Request');
+    let body;
+    try {
+      body = await req.json();
+    } catch (error) {
+      console.error('[ERROR]: Failed to parse request body', error);
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+
+    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = body;
+
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, apiHash, phoneNumber, extractType, action,
+      validationCode: validationCode ? 'Provided' : 'Not provided',
+    });
+
+    // Check for existing session
+    if (action === 'checkSession') {
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('session_string')
+        .eq('phone_number', phoneNumber)
+        .single();
+
+      if (userData?.session_string) {
+        return NextResponse.json({ hasSession: true });
+      } else {
+        return NextResponse.json({ hasSession: false });
+      }
+    }
+
+    // Input Validation
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+    }
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+    }
+
+    const validPhoneNumber = phoneNumber.trim();
+    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
+
+    checkRateLimit();
+
+    // Retrieve user data from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('session_string, phoneCodeHash, code_request_time, phone_registered')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('[FETCH ERROR]:', fetchError);
+      return handleErrorResponse('Error retrieving user data. Please try again.', 500);
+    }
+
+    // Get or initialize the persistent TelegramClient
+    const client = await getPersistentClient(apiId, apiHash, userData?.session_string || '');
+
+    if (!client.connected) {
+      throw new Error('Failed to connect to Telegram');
+    }
+
+    // If we have a session and an extract type, proceed with extraction
+    if (userData?.session_string && extractType) {
+      return await handleDataExtraction(client, validPhoneNumber, extractType);
+    }
+
+    // Step 1: Request validation code if not provided
+    if (!validationCode) {
+      return await handleCodeRequest(client, apiId, apiHash, validPhoneNumber);
+    }
+
+    // Step 2: Sign in or Sign up with the provided validation code
+    return await handleSignInOrSignUp(client, validPhoneNumber, userData, validationCode, extractType);
+
+  } catch (error) {
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  }
+}
+
+async function handleCodeRequest(client, apiId, apiHash, phoneNumber) {
+  console.log('[PROCESS]: Requesting validation code');
+  try {
+    const result = await client.sendCode(
+      {
+        apiId: parseInt(apiId),
+        apiHash: apiHash,
+      },
+      phoneNumber
+    );
+    console.log('[SUCCESS]: Validation code requested successfully');
+    
+    const userData = {
+      phone_number: phoneNumber,
+      api_id: parseInt(apiId),
+      api_hash: apiHash,
+      phoneCodeHash: result.phoneCodeHash,
+      code_request_time: new Date().toISOString(),
+      phone_registered: result.phone_registered !== false
+    };
+
+    const { error: upsertError } = await supabase
+      .from('users')
+      .upsert(userData)
+      .eq('phone_number', phoneNumber);
+
+    if (upsertError) {
+      console.error('[UPSERT ERROR]:', upsertError);
+      throw upsertError;
+    }
+
+    console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
+
+    return NextResponse.json({
+      success: true,
+      message: 'Validation code sent to your Telegram app. Please provide it in the next step.',
+      requiresValidation: true,
+      phoneRegistered: result.phone_registered !== false
+    });
+  } catch (error) {
+    console.error('[SEND CODE ERROR]:', error);
+    return handleTelegramError(error);
+  }
+}
+
+async function handleSignInOrSignUp(client, phoneNumber, userData, validationCode, extractType) {
+  console.log('[PROCESS]: Attempting to sign in/up with provided code');
+  try {
+    const { phoneCodeHash, code_request_time: codeRequestTime, phone_registered: phoneRegistered } = userData;
+
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > CODE_EXPIRATION_TIME) {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+
+    let signInResult;
+    if (phoneRegistered) {
+      signInResult = await client.invoke(new Api.auth.SignIn({
+        phoneNumber: phoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode
+      }));
+    } else {
+      signInResult = await client.invoke(new Api.auth.SignUp({
+        phoneNumber: phoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode,
+        firstName: 'New',
+        lastName: 'User'
+      }));
+    }
+
+    if (!signInResult.user) {
+      throw new Error('Failed to sign in/up. Please check your validation code and try again.');
+    }
+
+    console.log('[SUCCESS]: Signed in/up successfully');
+
+    // Save the session string
+    const sessionString = client.session.save();
+    await supabase
+      .from('users')
+      .update({ session_string: sessionString, phone_registered: true, phoneCodeHash: null, code_request_time: null })
+      .eq('phone_number', phoneNumber);
+
+    if (extractType) {
+      return await handleDataExtraction(client, phoneNumber, extractType);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Authentication successful',
+    });
+
+  } catch (error) {
+    console.error('[SIGN IN/UP ERROR]:', error);
+    if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+    return handleTelegramError(error);
+  }
+}
+
+async function handleDataExtraction(client, phoneNumber, extractType) {
+  let extractedData = [];
+  if (extractType === 'groups') {
+    const dialogs = await client.getDialogs();
+    extractedData = dialogs.map(dialog => ({
+      group_name: dialog.title,
+      group_id: dialog.id.toString(),
+      participant_count: dialog.participantsCount || 0,
+      type: dialog.isChannel ? 'channel' : 'group',
+      is_public: !!dialog.username,
+      owner_id: phoneNumber,
+    }));
+  } else if (extractType === 'contacts') {
+    const contacts = await client.getContacts();
+    extractedData = contacts.map(contact => ({
+      user_id: contact.id.toString(),
+      first_name: contact.firstName,
+      last_name: contact.lastName,
+      username: contact.username,
+      phone_number: contact.phone,
+      is_mutual_contact: contact.mutualContact,
+      owner_id: phoneNumber,
+    }));
+  } else {
+    throw new Error('Invalid extract type specified');
+  }
+
+  console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+  // Insert extracted data into Supabase
+  const { error: insertError } = await supabase
+    .from(extractType)
+    .insert(extractedData);
+
+  if (insertError) {
+    console.error('[INSERT ERROR]:', insertError);
+    throw insertError;
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: `${extractType} extracted successfully`,
+    data: extractedData,
+  });
+}
+
+// Route segment config
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+
+
+---
+File: /src/app/api/extract-data/route.js
+---
+
+import { NextResponse } from 'next/server';
+import { TelegramClient } from 'telegram';
+import { StringSession } from 'telegram/sessions';
+import { Api } from 'telegram/tl';
+import { checkRateLimit, handleTelegramError, handleErrorResponse } from '@/lib/apiUtils';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+const CODE_EXPIRATION_TIME = 30 * 60 * 1000; // 30 minutes in milliseconds
+
+// Persistent TelegramClient instance
+let persistentClient;
+
+async function getPersistentClient(apiId, apiHash, session = '') {
+  if (!persistentClient) {
+    const stringSession = new StringSession(session);
+    persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
+      connectionRetries: 3,
+      useWSS: true,
+      timeout: 20000, // Reduced timeout to 20 seconds
+      dev: false,
+    });
+    try {
+      await Promise.race([
+        persistentClient.connect(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 25000))
+      ]);
+    } catch (error) {
+      console.error('[CONNECTION ERROR]:', error);
+      persistentClient = null;
+      throw error;
+    }
+  }
+  return persistentClient;
+}
+
+export async function POST(req) {
+  try {
+    console.log('[START]: Handling API Request');
+    let body;
+    try {
+      body = await req.json();
+    } catch (error) {
+      console.error('[ERROR]: Failed to parse request body', error);
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
+
+    const { apiId, apiHash, phoneNumber, extractType, validationCode, action } = body;
+
+    console.log('[DEBUG]: Received payload:', { 
+      apiId, apiHash, phoneNumber, extractType, action,
+      validationCode: validationCode ? 'Provided' : 'Not provided',
+    });
+
+    // Check for existing session
+    if (action === 'checkSession') {
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('session_string')
+        .eq('phone_number', phoneNumber)
+        .single();
+
+      if (userData?.session_string) {
+        return NextResponse.json({ hasSession: true });
+      } else {
+        return NextResponse.json({ hasSession: false });
+      }
+    }
+
+    // Input Validation
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      return handleErrorResponse('API ID is invalid or missing. Please provide a valid positive number.', 400);
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      return handleErrorResponse('API Hash is invalid. It should be a 32-character hexadecimal string.', 400);
+    }
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+      return handleErrorResponse('Phone number is missing or invalid. Please enter a valid phone number.', 400);
+    }
+
+    const validPhoneNumber = phoneNumber.trim();
+    console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
+
+    checkRateLimit();
+
+    // Retrieve user data from Supabase
+    const { data: userData, error: fetchError } = await supabase
+      .from('users')
+      .select('session_string, phoneCodeHash, code_request_time, phone_registered')
+      .eq('phone_number', validPhoneNumber)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('[FETCH ERROR]:', fetchError);
+      return handleErrorResponse('Error retrieving user data. Please try again.', 500);
+    }
+
+    try {
+      const client = await getPersistentClient(apiId, apiHash, userData?.session_string || '');
+
+      if (!client.connected) {
+        throw new Error('Failed to connect to Telegram');
+      }
+
+      // If we have a session and an extract type, proceed with extraction
+      if (userData?.session_string && extractType) {
+        return await handleDataExtraction(client, validPhoneNumber, extractType);
+      }
+
+      // Step 1: Request validation code if not provided
+      if (!validationCode) {
+        return await handleCodeRequest(client, apiId, apiHash, validPhoneNumber);
+      }
+
+      // Step 2: Sign in or Sign up with the provided validation code
+      return await handleSignInOrSignUp(client, validPhoneNumber, userData, validationCode, extractType);
+
+    } catch (error) {
+      console.error('[TELEGRAM CONNECTION ERROR]:', error);
+      return NextResponse.json({ 
+        error: 'Failed to connect to Telegram servers. Please try again later.',
+        details: error.message
+      }, { status: 503 });
+    }
+
+  } catch (error) {
+    console.error('[GENERAL API ERROR]: Error in extract-data API:', error);
+    return handleErrorResponse('An unexpected error occurred. Please try again later.', 500, error);
+  }
+}
+
+async function handleCodeRequest(client, apiId, apiHash, phoneNumber) {
+  console.log('[PROCESS]: Requesting validation code');
+  try {
+    const result = await client.sendCode(
+      {
+        apiId: parseInt(apiId),
+        apiHash: apiHash,
+      },
+      phoneNumber
+    );
+    console.log('[SUCCESS]: Validation code requested successfully');
+    
+    const userData = {
+      phone_number: phoneNumber,
+      api_id: parseInt(apiId),
+      api_hash: apiHash,
+      phoneCodeHash: result.phoneCodeHash,
+      code_request_time: new Date().toISOString(),
+      phone_registered: result.phone_registered !== false
+    };
+
+    const { error: upsertError } = await supabase
+      .from('users')
+      .upsert(userData)
+      .eq('phone_number', phoneNumber);
+
+    if (upsertError) {
+      console.error('[UPSERT ERROR]:', upsertError);
+      throw upsertError;
+    }
+
+    console.log('[DEBUG]: Updated user with phoneCodeHash and code_request_time');
+
+    return NextResponse.json({
+      success: true,
+      message: 'Validation code sent to your Telegram app. Please provide it in the next step.',
+      requiresValidation: true,
+      phoneRegistered: result.phone_registered !== false
+    });
+  } catch (error) {
+    console.error('[SEND CODE ERROR]:', error);
+    return handleTelegramError(error);
+  }
+}
+
+async function handleSignInOrSignUp(client, phoneNumber, userData, validationCode, extractType) {
+  console.log('[PROCESS]: Attempting to sign in/up with provided code');
+  try {
+    const { phoneCodeHash, code_request_time: codeRequestTime, phone_registered: phoneRegistered } = userData;
+
+    if (!phoneCodeHash || !codeRequestTime) {
+      return handleErrorResponse('Validation code not requested or expired. Please request a new code.', 400);
+    }
+
+    // Check if the code has expired
+    const codeRequestDate = new Date(codeRequestTime).getTime();
+    const currentTime = Date.now();
+    if ((currentTime - codeRequestDate) > CODE_EXPIRATION_TIME) {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+
+    let signInResult;
+    if (phoneRegistered) {
+      signInResult = await client.invoke(new Api.auth.SignIn({
+        phoneNumber: phoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode
+      }));
+    } else {
+      signInResult = await client.invoke(new Api.auth.SignUp({
+        phoneNumber: phoneNumber,
+        phoneCodeHash: phoneCodeHash,
+        phoneCode: validationCode,
+        firstName: 'New',
+        lastName: 'User'
+      }));
+    }
+
+    if (!signInResult.user) {
+      throw new Error('Failed to sign in/up. Please check your validation code and try again.');
+    }
+
+    console.log('[SUCCESS]: Signed in/up successfully');
+
+    // Save the session string
+    const sessionString = client.session.save();
+    await supabase
+      .from('users')
+      .update({ session_string: sessionString, phone_registered: true, phoneCodeHash: null, code_request_time: null })
+      .eq('phone_number', phoneNumber);
+
+    if (extractType) {
+      return await handleDataExtraction(client, phoneNumber, extractType);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Authentication successful',
+    });
+
+  } catch (error) {
+    console.error('[SIGN IN/UP ERROR]:', error);
+    if (error.errorMessage === 'PHONE_CODE_EXPIRED') {
+      return NextResponse.json({
+        success: false,
+        message: 'The verification code has expired. Please request a new code.',
+        code: 'PHONE_CODE_EXPIRED'
+      });
+    }
+    return handleTelegramError(error);
+  }
+}
+
+async function handleDataExtraction(client, phoneNumber, extractType) {
+  let extractedData = [];
+  if (extractType === 'groups') {
+    const dialogs = await client.getDialogs();
+    extractedData = dialogs.map(dialog => ({
+      group_name: dialog.title,
+      group_id: dialog.id.toString(),
+      participant_count: dialog.participantsCount || 0,
+      type: dialog.isChannel ? 'channel' : 'group',
+      is_public: !!dialog.username,
+      owner_id: phoneNumber,
+    }));
+  } else if (extractType === 'contacts') {
+    const contacts = await client.getContacts();
+    extractedData = contacts.map(contact => ({
+      user_id: contact.id.toString(),
+      first_name: contact.firstName,
+      last_name: contact.lastName,
+      username: contact.username,
+      phone_number: contact.phone,
+      is_mutual_contact: contact.mutualContact,
+      owner_id: phoneNumber,
+    }));
+  } else {
+    throw new Error('Invalid extract type specified');
+  }
+
+  console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+  // Insert extracted data into Supabase
+  const { error: insertError } = await supabase
+    .from(extractType)
+    .insert(extractedData);
+
+  if (insertError) {
+    console.error('[INSERT ERROR]:', insertError);
+    throw insertError;
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: `${extractType} extracted successfully`,
+    data: extractedData,
+  });
+}
+
+// Route segment config
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 
 ---
@@ -1284,7 +2542,7 @@ export default function GroupsList() {
 
 
 ---
-File: /src/components/TelegramManager.jsx
+File: /src/components/TelegramManager-workingversion071024.jsx
 ---
 
 import React, { useState, useEffect } from 'react'
@@ -1331,8 +2589,8 @@ export default function TelegramManager() {
       setError('API Hash should be a 32-character hexadecimal string')
       return false
     }
-    if (!phoneNumber || phoneNumber.trim() === '') {
-      setError('Please enter a valid phone number')
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
       return false
     }
     return true
@@ -1374,7 +2632,7 @@ export default function TelegramManager() {
       console.log('[DEBUG]: Received response:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to process request')
+        throw new Error(data.error?.message || 'Failed to process request')
       }
 
       if (data.requiresValidation) {
@@ -1392,7 +2650,7 @@ export default function TelegramManager() {
           router.push(`/${extractType}-list`)
         }
       } else {
-        setError('An unexpected error occurred. Please try again.')
+        setError(data.message || 'An unexpected error occurred. Please try again.')
       }
     } catch (error) {
       console.error('[ERROR]: Submit failed:', error)
@@ -1484,6 +2742,1062 @@ export default function TelegramManager() {
     </div>
   )
 }
+
+
+
+---
+File: /src/components/TelegramManager-workingversion081024.jsx
+---
+
+import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
+
+export default function TelegramManager() {
+  const router = useRouter()
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [error, setError] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [codeRequestTime, setCodeRequestTime] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
+  const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
+
+  useEffect(() => {
+    let timer
+    if (showValidationInput && codeRequestTime) {
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
+        const remaining = Math.max(CODE_EXPIRATION_TIME - elapsed, 0)
+        setTimeRemaining(remaining)
+        if (remaining === 0) {
+          setError('Code expired. Please request a new one.')
+          setShowValidationInput(false)
+          setValidationCode('')
+          setCodeRequestTime(null)
+        }
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [showValidationInput, codeRequestTime])
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a valid positive number')
+      return false
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      setError('API Hash should be a 32-character hexadecimal string')
+      return false
+    }
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
+      return false
+    }
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setSuccessMessage(null)
+    setIsLoading(true)
+
+    if (!validateInputs()) {
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        validationCode: showValidationInput ? validationCode : undefined,
+      }
+
+      console.log('[DEBUG]: Submitting request with:', {
+        ...payload,
+        apiHash: '******',
+        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
+        validationCode: payload.validationCode ? '******' : undefined,
+      })
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+      console.log('[DEBUG]: Received response:', data)
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error('This phone number is already registered. Please use a different number or try again later.');
+        }
+        throw new Error(data.error?.message || 'Failed to process request')
+      }
+
+      if (data.requiresValidation) {
+        setShowValidationInput(true)
+        setCodeRequestTime(Date.now())
+        setTimeRemaining(CODE_EXPIRATION_TIME)
+        setIsPhoneRegistered(data.phoneRegistered)
+        setSuccessMessage(`Validation code sent to your phone. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+      } else if (data.success) {
+        if (showValidationInput) {
+          setIsAuthenticated(true)
+          setShowValidationInput(false)
+          setSuccessMessage('Authentication successful. You can now extract data.')
+        } else if (data.data) {
+          setSuccessMessage(`Extracted ${data.data.length} ${extractType}`)
+          setTimeout(() => router.push(`/${extractType}-list`), 2000)
+        }
+      } else if (data.code === 'PHONE_CODE_EXPIRED') {
+        setError('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
+      } else {
+        setError(data.message || 'An unexpected error occurred. Please try again.')
+      }
+    } catch (error) {
+      console.error('[ERROR]: Submit failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const renderTimer = () => {
+    const minutes = Math.floor(timeRemaining / 60)
+    const seconds = timeRemaining % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Telegram Extractor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-id">API ID</Label>
+              <Input
+                id="api-id"
+                value={apiId}
+                onChange={(e) => setApiId(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="api-hash">API Hash</Label>
+              <Input
+                id="api-hash"
+                value={apiHash}
+                onChange={(e) => setApiHash(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API Hash"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your phone number (with country code)"
+              />
+            </div>
+            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="groups">Extract Groups</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="contacts">Extract Contacts</Label>
+              </div>
+            </RadioGroup>
+            {showValidationInput && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the code sent to your Telegram app"
+                />
+                <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
+                {isPhoneRegistered !== null && (
+                  <p className="text-sm text-blue-500">
+                    {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
+                  </p>
+                )}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
+                (isAuthenticated ? 'Extract Data' : 
+                  (showValidationInput ? 'Verify Code' : 'Request Code'))}
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {successMessage && (
+            <Alert className="mt-4">
+              <AlertTitle>Success</AlertTitle>
+              <AlertDescription>{successMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+
+
+---
+File: /src/components/TelegramManager-workingversion081024v2.jsx
+---
+
+import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
+
+export default function TelegramManager() {
+  const router = useRouter()
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [error, setError] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [codeRequestTime, setCodeRequestTime] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
+  const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
+
+  useEffect(() => {
+    let timer
+    if (showValidationInput && codeRequestTime) {
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
+        const remaining = Math.max(CODE_EXPIRATION_TIME - elapsed, 0)
+        setTimeRemaining(remaining)
+        if (remaining === 0) {
+          setError('Code expired. Please request a new one.')
+          setShowValidationInput(false)
+          setValidationCode('')
+          setCodeRequestTime(null)
+        }
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [showValidationInput, codeRequestTime])
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a valid positive number')
+      return false
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      setError('API Hash should be a 32-character hexadecimal string')
+      return false
+    }
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
+      return false
+    }
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setSuccessMessage(null)
+    setIsLoading(true)
+
+    if (!validateInputs()) {
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        validationCode: showValidationInput ? validationCode : undefined,
+      }
+
+      console.log('[DEBUG]: Submitting request with:', {
+        ...payload,
+        apiHash: '******',
+        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
+        validationCode: payload.validationCode ? '******' : undefined,
+      })
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      const data = await response.json()
+      console.log('[DEBUG]: Received response:', data)
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error('This phone number is already registered. Please use a different number or try again later.');
+        }
+        throw new Error(data.error?.message || 'Failed to process request')
+      }
+
+      if (data.requiresValidation) {
+        setShowValidationInput(true)
+        setCodeRequestTime(Date.now())
+        setTimeRemaining(CODE_EXPIRATION_TIME)
+        setIsPhoneRegistered(data.phoneRegistered)
+        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+      } else if (data.success) {
+        if (showValidationInput) {
+          setIsAuthenticated(true)
+          setShowValidationInput(false)
+          setSuccessMessage('Authentication successful. You can now extract data.')
+        } else if (data.data) {
+          setSuccessMessage(`Extracted ${data.data.length} ${extractType}`)
+          setTimeout(() => router.push(`/${extractType}-list`), 2000)
+        }
+      } else if (data.code === 'PHONE_CODE_EXPIRED') {
+        setError('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
+      } else {
+        setError(data.message || 'An unexpected error occurred. Please try again.')
+      }
+    } catch (error) {
+      console.error('[ERROR]: Submit failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const renderTimer = () => {
+    const minutes = Math.floor(timeRemaining / 60)
+    const seconds = timeRemaining % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Telegram Extractor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-id">API ID</Label>
+              <Input
+                id="api-id"
+                value={apiId}
+                onChange={(e) => setApiId(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="api-hash">API Hash</Label>
+              <Input
+                id="api-hash"
+                value={apiHash}
+                onChange={(e) => setApiHash(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API Hash"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your phone number (with country code)"
+              />
+            </div>
+            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="groups">Extract Groups</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="contacts">Extract Contacts</Label>
+              </div>
+            </RadioGroup>
+            {showValidationInput && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the code sent to your Telegram app"
+                />
+                <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
+                <p className="text-sm text-blue-500">
+                  Please check your Telegram app for the verification code.
+                </p>
+                {isPhoneRegistered !== null && (
+                  <p className="text-sm text-blue-500">
+                    {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
+                  </p>
+                )}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
+                (isAuthenticated ? 'Extract Data' : 
+                  (showValidationInput ? 'Verify Code' : 'Request Code'))}
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {successMessage && (
+            <Alert className="mt-4">
+              <AlertTitle>Success</AlertTitle>
+              <AlertDescription>{successMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+
+
+---
+File: /src/components/TelegramManager-workingversion081024v3.jsx
+---
+
+import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
+
+export default function TelegramManager() {
+  const router = useRouter()
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [error, setError] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [codeRequestTime, setCodeRequestTime] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
+  const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
+  const [hasExistingSession, setHasExistingSession] = useState(false)
+
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      if (phoneNumber && apiId && apiHash) {
+        setIsLoading(true)
+        try {
+          const response = await fetch('/api/extract-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              action: 'checkSession', 
+              phoneNumber: phoneNumber.trim(),
+              apiId: parseInt(apiId),
+              apiHash
+            }),
+          });
+          const data = await response.json();
+          setHasExistingSession(data.hasSession);
+          if (data.hasSession) {
+            setIsAuthenticated(true);
+            setSuccessMessage('You have an existing session. You can proceed with data extraction.');
+          }
+        } catch (error) {
+          console.error('Failed to check session:', error);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    checkExistingSession();
+  }, [phoneNumber, apiId, apiHash]);
+
+  useEffect(() => {
+    let timer
+    if (showValidationInput && codeRequestTime) {
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
+        const remaining = Math.max(CODE_EXPIRATION_TIME - elapsed, 0)
+        setTimeRemaining(remaining)
+        if (remaining === 0) {
+          setError('Code expired. Please request a new one.')
+          setShowValidationInput(false)
+          setValidationCode('')
+          setCodeRequestTime(null)
+        }
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [showValidationInput, codeRequestTime])
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a valid positive number')
+      return false
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      setError('API Hash should be a 32-character hexadecimal string')
+      return false
+    }
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
+      return false
+    }
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setSuccessMessage(null)
+    setIsLoading(true)
+
+    if (!validateInputs()) {
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        validationCode: showValidationInput ? validationCode : undefined,
+      }
+
+      console.log('[DEBUG]: Submitting request with:', {
+        ...payload,
+        apiHash: '******',
+        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
+        validationCode: payload.validationCode ? '******' : undefined,
+      })
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error('[ERROR]: Failed to parse JSON response:', jsonError);
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
+
+      console.log('[DEBUG]: Received response:', data)
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to process request')
+      }
+
+      if (data.requiresValidation) {
+        setShowValidationInput(true)
+        setCodeRequestTime(Date.now())
+        setTimeRemaining(CODE_EXPIRATION_TIME)
+        setIsPhoneRegistered(data.phoneRegistered)
+        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+      } else if (data.success) {
+        if (showValidationInput || hasExistingSession) {
+          setIsAuthenticated(true)
+          setShowValidationInput(false)
+          setSuccessMessage('Authentication successful. You can now extract data.')
+        } else if (data.data) {
+          setSuccessMessage(`Extracted ${data.data.length} ${extractType}`)
+          setTimeout(() => router.push(`/${extractType}-list`), 2000)
+        }
+      } else if (data.code === 'PHONE_CODE_EXPIRED') {
+        setError('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
+      } else {
+        setError(data.message || 'An unexpected error occurred. Please try again.')
+      }
+    } catch (error) {
+      console.error('[ERROR]: Submit failed:', error)
+      setError(error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const renderTimer = () => {
+    const minutes = Math.floor(timeRemaining / 60)
+    const seconds = timeRemaining % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Telegram Extractor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-id">API ID</Label>
+              <Input
+                id="api-id"
+                value={apiId}
+                onChange={(e) => setApiId(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="api-hash">API Hash</Label>
+              <Input
+                id="api-hash"
+                value={apiHash}
+                onChange={(e) => setApiHash(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API Hash"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your phone number (with country code)"
+              />
+            </div>
+            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="groups">Extract Groups</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="contacts">Extract Contacts</Label>
+              </div>
+            </RadioGroup>
+            {showValidationInput && !hasExistingSession && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the code sent to your Telegram app"
+                />
+                <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
+                <p className="text-sm text-blue-500">
+                  Please check your Telegram app for the verification code.
+                </p>
+                {isPhoneRegistered !== null && (
+                  <p className="text-sm text-blue-500">
+                    {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
+                  </p>
+                )}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
+                (isAuthenticated ? 'Extract Data' : 
+                  (showValidationInput ? 'Verify Code' : 'Request Code'))}
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {successMessage && (
+            <Alert className="mt-4">
+              <AlertTitle>Success</AlertTitle>
+              <AlertDescription>{successMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+
+
+---
+File: /src/components/TelegramManager.jsx
+---
+
+import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { Loader2 } from 'lucide-react'
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
+
+export default function TelegramManager() {
+  const router = useRouter()
+  const [apiId, setApiId] = useState('')
+  const [apiHash, setApiHash] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [extractType, setExtractType] = useState('groups')
+  const [validationCode, setValidationCode] = useState('')
+  const [showValidationInput, setShowValidationInput] = useState(false)
+  const [error, setError] = useState(null)
+  const [successMessage, setSuccessMessage] = useState(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [codeRequestTime, setCodeRequestTime] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [timeRemaining, setTimeRemaining] = useState(CODE_EXPIRATION_TIME)
+  const [isPhoneRegistered, setIsPhoneRegistered] = useState(null)
+  const [hasExistingSession, setHasExistingSession] = useState(false)
+
+  useEffect(() => {
+    const checkExistingSession = async () => {
+      if (phoneNumber && apiId && apiHash) {
+        setIsLoading(true)
+        try {
+          const response = await fetch('/api/extract-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              action: 'checkSession', 
+              phoneNumber: phoneNumber.trim(),
+              apiId: parseInt(apiId),
+              apiHash
+            }),
+          });
+          if (!response.ok) {
+            throw new Error('Failed to check session');
+          }
+          const data = await response.json();
+          setHasExistingSession(data.hasSession);
+          if (data.hasSession) {
+            setIsAuthenticated(true);
+            setSuccessMessage('You have an existing session. You can proceed with data extraction.');
+          }
+        } catch (error) {
+          console.error('Failed to check session:', error);
+          setError('Failed to check for existing session. Please try again.');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    checkExistingSession();
+  }, [phoneNumber, apiId, apiHash]);
+
+  useEffect(() => {
+    let timer
+    if (showValidationInput && codeRequestTime) {
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - codeRequestTime) / 1000)
+        const remaining = Math.max(CODE_EXPIRATION_TIME - elapsed, 0)
+        setTimeRemaining(remaining)
+        if (remaining === 0) {
+          setError('Code expired. Please request a new one.')
+          setShowValidationInput(false)
+          setValidationCode('')
+          setCodeRequestTime(null)
+        }
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [showValidationInput, codeRequestTime])
+
+  const validateInputs = () => {
+    if (!apiId || isNaN(apiId) || parseInt(apiId) <= 0) {
+      setError('API ID must be a valid positive number')
+      return false
+    }
+    if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+      setError('API Hash should be a 32-character hexadecimal string')
+      return false
+    }
+    if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
+      setError('Please enter a valid phone number with country code (e.g., +1234567890)')
+      return false
+    }
+    return true
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setSuccessMessage(null)
+    setIsLoading(true)
+
+    if (!validateInputs()) {
+      setIsLoading(false)
+      return
+    }
+
+    try {
+      const payload = {
+        apiId: parseInt(apiId),
+        apiHash,
+        phoneNumber: phoneNumber.trim(),
+        extractType,
+        validationCode: showValidationInput ? validationCode : undefined,
+      }
+
+      console.log('[DEBUG]: Submitting request with:', {
+        ...payload,
+        apiHash: '******',
+        phoneNumber: '*******' + payload.phoneNumber.slice(-4),
+        validationCode: payload.validationCode ? '******' : undefined,
+      })
+
+      const response = await fetch('/api/extract-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          throw new Error('Unable to connect to Telegram servers. Please try again later.');
+        }
+        throw new Error('Server returned an error. Please try again.');
+      }
+
+      const data = await response.json();
+      console.log('[DEBUG]: Received response:', data)
+
+      if (data.requiresValidation) {
+        setShowValidationInput(true)
+        setCodeRequestTime(Date.now())
+        setTimeRemaining(CODE_EXPIRATION_TIME)
+        setIsPhoneRegistered(data.phoneRegistered)
+        setSuccessMessage(`Validation code sent to your Telegram app. ${data.phoneRegistered ? 'Your phone is registered.' : 'Your phone is not registered and will be signed up.'}`)
+      } else if (data.success) {
+        if (showValidationInput || hasExistingSession) {
+          setIsAuthenticated(true)
+          setShowValidationInput(false)
+          setSuccessMessage('Authentication successful. You can now extract data.')
+        } else if (data.data) {
+          setSuccessMessage(`Extracted ${data.data.length} ${extractType}`)
+          setTimeout(() => router.push(`/${extractType}-list`), 2000)
+        }
+      } else if (data.code === 'PHONE_CODE_EXPIRED') {
+        setError('The verification code has expired. Please request a new code.')
+        setShowValidationInput(false)
+        setValidationCode('')
+        setCodeRequestTime(null)
+      } else {
+        setError(data.message || 'An unexpected error occurred. Please try again.')
+      }
+    } catch (error) {
+      console.error('[ERROR]: Submit failed:', error)
+      setError(error.message || 'An unexpected error occurred. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const renderTimer = () => {
+    const minutes = Math.floor(timeRemaining / 60)
+    const seconds = timeRemaining % 60
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Telegram Extractor</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="api-id">API ID</Label>
+              <Input
+                id="api-id"
+                value={apiId}
+                onChange={(e) => setApiId(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="api-hash">API Hash</Label>
+              <Input
+                id="api-hash"
+                value={apiHash}
+                onChange={(e) => setApiHash(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your API Hash"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone-number">Phone Number</Label>
+              <Input
+                id="phone-number"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                required
+                disabled={isLoading || showValidationInput || isAuthenticated}
+                placeholder="Enter your phone number (with country code)"
+              />
+            </div>
+            <RadioGroup value={extractType} onValueChange={setExtractType} className="flex flex-col space-y-1">
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="groups" id="groups" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="groups">Extract Groups</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="contacts" id="contacts" disabled={isLoading || !isAuthenticated} />
+                <Label htmlFor="contacts">Extract Contacts</Label>
+              </div>
+            </RadioGroup>
+            {showValidationInput && !hasExistingSession && (
+              <div className="space-y-2">
+                <Label htmlFor="validation-code">Validation Code</Label>
+                <Input
+                  id="validation-code"
+                  value={validationCode}
+                  onChange={(e) => setValidationCode(e.target.value)}
+                  required
+                  disabled={isLoading}
+                  placeholder="Enter the code sent to your Telegram app"
+                />
+                <p className="text-sm text-gray-500">Code expires in: {renderTimer()}</p>
+                <p className="text-sm text-blue-500">
+                  Please check your Telegram app for the verification code.
+                </p>
+                {isPhoneRegistered !== null && (
+                  <p className="text-sm text-blue-500">
+                    {isPhoneRegistered ? 'Phone is registered.' : 'Phone is not registered and will be signed up.'}
+                  </p>
+                )}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 
+                (isAuthenticated ? 'Extract Data' : 
+                  (showValidationInput ? 'Verify Code' : 'Request Code'))}
+            </Button>
+          </form>
+          {error && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {successMessage && (
+            <Alert className="mt-4">
+              <AlertTitle>Success</AlertTitle>
+              <AlertDescription>{successMessage}</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 
 
 ---
@@ -1849,27 +4163,49 @@ File: /next.config.js
 ---
 
 /** @type {import('next').NextConfig} */
-module.exports = {
-    reactStrictMode: true,
-    env: {
-      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
-      NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME,
-    },
-    // Add this section to ignore type checking during build
-    typescript: {
-      // !! WARN !!
-      // Dangerously allow production builds to successfully complete even if
-      // your project has type errors.
-      // !! WARN !!
-      ignoreBuildErrors: true,
-    },
-    // Add this to allow the use of top-level await in your application
-    experimental: {
-      esmExternals: 'loose',
-    },
-  }
+const nextConfig = {
+  reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
+    NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME,
+  },
+  typescript: {
+    // It's recommended to remove this in production and fix type errors
+    ignoreBuildErrors: true,
+  },
+  experimental: {
+    esmExternals: 'loose',
+  },
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+      };
+    }
+    return config;
+  },
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET,DELETE,PATCH,POST,PUT' },
+          { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
+        ],
+      },
+    ];
+  },
+};
+
+module.exports = nextConfig;
+
 
 
 ---
@@ -1890,7 +4226,7 @@ File: /package.json
   "author": "ElPi",
   "license": "MIT",
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=16.0.0"
   },
   "dependencies": {
     "@mtproto/core": "^6.3.0",
@@ -1901,7 +4237,6 @@ File: /package.json
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-tabs": "^1.0.4",
     "@supabase/supabase-js": "^2.45.4",
-    "@types/node": "^22.7.4",
     "class-variance-authority": "^0.7.0",
     "csv-stringify": "^6.4.4",
     "date-fns": "^2.30.0",
@@ -1915,10 +4250,14 @@ File: /package.json
     "telegram": "^2.25.15"
   },
   "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
     "autoprefixer": "^10.4.16",
     "eslint": "^8.0.0",
     "postcss": "^8.4.31",
-    "tailwindcss": "^3.3.5"
+    "tailwindcss": "^3.3.5",
+    "typescript": "^5.0.0"
   }
 }
 
@@ -1934,6 +4273,38 @@ module.exports = {
     autoprefixer: {},
   },
 }
+
+
+
+---
+File: /project-process.md
+---
+
+Process:
+User Form Submission:
+
+The user fills in the form with:
+API ID
+API Hash
+Phone Number
+Selects either "Extract Groups" or "Extract Contacts"
+User clicks on Request Code.
+What happens here:
+
+The API should validate the inputs (API ID, API Hash, and Phone Number).
+If validation passes, the API sends a request to Telegram to send the verification code to the user's phone number.
+The user is created in Supabase if they don't already exist.
+No data extraction happens at this stage—just the request for the verification code.
+User Submits Verification Code:
+
+The user receives the verification code on their phone.
+They enter the verification code into the form and submit it.
+What happens here:
+
+The API takes the verification code and verifies it with Telegram.
+Once verified, the API makes a request to Telegram to extract either groups or contacts, based on the user’s selection.
+The extracted data is then stored in Supabase (either in the groups or contacts table).
+____________________________________________________________________________
 
 
 
@@ -2427,6 +4798,14 @@ File: /vercel.json
     }
   ],
   "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1",
+      "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "*"
+      }
+    },
     {
       "src": "/(.*)",
       "dest": "/$1"

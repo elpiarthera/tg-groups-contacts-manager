@@ -21,13 +21,13 @@ async function getPersistentClient(apiId, apiHash, session = '') {
     persistentClient = new TelegramClient(stringSession, parseInt(apiId), apiHash, {
       connectionRetries: 3,
       useWSS: true,
-      timeout: 15000, // Reduced timeout to 15 seconds
+      timeout: 20000, // Reduced timeout to 20 seconds
       dev: false,
     });
     try {
       await Promise.race([
         persistentClient.connect(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 20000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection timeout')), 25000))
       ]);
     } catch (error) {
       console.error('[CONNECTION ERROR]:', error);
@@ -252,53 +252,48 @@ async function handleSignInOrSignUp(client, phoneNumber, userData, validationCod
 
 async function handleDataExtraction(client, phoneNumber, extractType) {
   let extractedData = [];
-  try {
-    if (extractType === 'groups') {
-      const dialogs = await client.getDialogs({limit: 50}); // Limit to 50 to reduce processing time
-      extractedData = dialogs.map(dialog => ({
-        group_name: dialog.title,
-        group_id: dialog.id.toString(),
-        participant_count: dialog.participantsCount || 0,
-        type: dialog.isChannel ? 'channel' : 'group',
-        is_public: !!dialog.username,
-        owner_id: phoneNumber,
-      }));
-    } else if (extractType === 'contacts') {
-      const contacts = await client.getContacts();
-      extractedData = contacts.map(contact => ({
-        user_id: contact.id.toString(),
-        first_name: contact.firstName,
-        last_name: contact.lastName,
-        username: contact.username,
-        phone_number: contact.phone,
-        is_mutual_contact: contact.mutualContact,
-        owner_id: phoneNumber,
-      }));
-    } else {
-      throw new Error('Invalid extract type specified');
-    }
-
-    console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
-
-    // Insert extracted data into Supabase
-    const { error: insertError } = await supabase
-      .from(extractType)
-      .insert(extractedData);
-
-    if (insertError) {
-      console.error('[INSERT ERROR]:', insertError);
-      throw insertError;
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: `${extractType} extracted successfully`,
-      data: extractedData,
-    });
-  } catch (error) {
-    console.error('[DATA EXTRACTION ERROR]:', error);
-    return handleErrorResponse(`Failed to extract ${extractType}. Please try again.`, 500);
+  if (extractType === 'groups') {
+    const dialogs = await client.getDialogs();
+    extractedData = dialogs.map(dialog => ({
+      group_name: dialog.title,
+      group_id: dialog.id.toString(),
+      participant_count: dialog.participantsCount || 0,
+      type: dialog.isChannel ? 'channel' : 'group',
+      is_public: !!dialog.username,
+      owner_id: phoneNumber,
+    }));
+  } else if (extractType === 'contacts') {
+    const contacts = await client.getContacts();
+    extractedData = contacts.map(contact => ({
+      user_id: contact.id.toString(),
+      first_name: contact.firstName,
+      last_name: contact.lastName,
+      username: contact.username,
+      phone_number: contact.phone,
+      is_mutual_contact: contact.mutualContact,
+      owner_id: phoneNumber,
+    }));
+  } else {
+    throw new Error('Invalid extract type specified');
   }
+
+  console.log(`[DEBUG]: Extracted ${extractedData.length} ${extractType}`);
+
+  // Insert extracted data into Supabase
+  const { error: insertError } = await supabase
+    .from(extractType)
+    .insert(extractedData);
+
+  if (insertError) {
+    console.error('[INSERT ERROR]:', insertError);
+    throw insertError;
+  }
+
+  return NextResponse.json({
+    success: true,
+    message: `${extractType} extracted successfully`,
+    data: extractedData,
+  });
 }
 
 // Route segment config
