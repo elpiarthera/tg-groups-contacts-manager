@@ -1,12 +1,10 @@
-import React from 'react';
+import ContactsList from '@/components/ContactsList'
 
-const ContactsListPage = () => {
+export default function ContactsListPage() {
   return (
-    <div className="container mx-auto p-4">
+    <div className="container mx-auto py-10">
       <h1 className="text-2xl font-bold mb-4">Contacts List</h1>
-      <p>This page will display the extracted contacts.</p>
+      <ContactsList />
     </div>
-  );
-};
-
-export default ContactsListPage;
+  )
+}

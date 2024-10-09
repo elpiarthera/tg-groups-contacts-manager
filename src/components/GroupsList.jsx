@@ -28,14 +28,15 @@ export default function GroupsList() {
   const fetchGroups = async () => {
     try {
       setIsLoading(true);
+      setError(null);
       const { data, error, count } = await supabase
         .from('groups')
         .select('*', { count: 'exact' })
         .range((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE - 1);
 
       if (error) throw error;
-      setGroups(data);
-      setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
+      setGroups(data || []); // Ensure groups is always an array
+      setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE));
     } catch (error) {
       console.error('Error fetching groups:', error);
       setError('Failed to load groups. Please try again.');
@@ -99,59 +100,65 @@ export default function GroupsList() {
   return (
     <div className="container mx-auto py-10">
       <h2 className="text-2xl font-bold mb-4">Groups List</h2>
-      <div className="mb-4 flex items-center">
-        <Checkbox
-          id="select-all"
-          checked={selectAll}
-          onCheckedChange={handleSelectAll}
-        />
-        <label htmlFor="select-all" className="ml-2">
-          {selectAll ? "Unselect All" : "Select All"}
-        </label>
-      </div>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Select</TableHead>
-            <TableHead>Group Name</TableHead>
-            <TableHead>Description</TableHead>
-            <TableHead>Invite Link</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {groups.map((group) => (
-            <TableRow key={group.id}>
-              <TableCell>
-                <Checkbox
-                  checked={selectedGroups.includes(group.id)}
-                  onCheckedChange={() => handleSelectGroup(group.id)}
-                />
-              </TableCell>
-              <TableCell>{group.group_name}</TableCell>
-              <TableCell>{group.description}</TableCell>
-              <TableCell>
-                <a href={group.invite_link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
-                  {group.invite_link}
-                </a>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <div className="mt-4 flex justify-between items-center">
-        <Button 
-          onClick={handleExtract} 
-          disabled={selectedGroups.length === 0 || isExtracting}
-          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
-        >
-          {isExtracting ? 'Extracting...' : `Extract Selected Groups (${selectedGroups.length})`}
-        </Button>
-        <Pagination 
-          currentPage={currentPage} 
-          totalPages={totalPages} 
-          onPageChange={setCurrentPage} 
-        />
-      </div>
+      {groups.length === 0 ? (
+        <p>No groups found. Try extracting groups first.</p>
+      ) : (
+        <>
+          <div className="mb-4 flex items-center">
+            <Checkbox
+              id="select-all"
+              checked={selectAll}
+              onCheckedChange={handleSelectAll}
+            />
+            <label htmlFor="select-all" className="ml-2">
+              {selectAll ? "Unselect All" : "Select All"}
+            </label>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Select</TableHead>
+                <TableHead>Group Name</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Invite Link</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {groups.map((group) => (
+                <TableRow key={group.id}>
+                  <TableCell>
+                    <Checkbox
+                      checked={selectedGroups.includes(group.id)}
+                      onCheckedChange={() => handleSelectGroup(group.id)}
+                    />
+                  </TableCell>
+                  <TableCell>{group.group_name}</TableCell>
+                  <TableCell>{group.description}</TableCell>
+                  <TableCell>
+                    <a href={group.invite_link} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                      {group.invite_link}
+                    </a>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="mt-4 flex justify-between items-center">
+            <Button 
+              onClick={handleExtract} 
+              disabled={selectedGroups.length === 0 || isExtracting}
+              className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+            >
+              {isExtracting ? 'Extracting...' : `Extract Selected Groups (${selectedGroups.length})`}
+            </Button>
+            <Pagination 
+              currentPage={currentPage} 
+              totalPages={totalPages} 
+              onPageChange={setCurrentPage} 
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

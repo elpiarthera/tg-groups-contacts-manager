@@ -1,24 +1,45 @@
-import React from 'react';
-import { supabase } from '@/lib/apiUtils';
+'use client'
 
-const GroupsList = async () => {
-  const { data: groups, error } = await supabase.from('groups').select('*');
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import GroupsList from '@/components/GroupsList';
+
+const GroupsListPage = () => {
+  const [groups, setGroups] = useState([]);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const { data, error } = await supabase.from('groups').select('*');
+        if (error) throw error;
+        setGroups(data);
+      } catch (error) {
+        console.error('Error fetching groups:', error);
+        setError('Failed to load groups. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchGroups();
+  }, []);
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
 
   if (error) {
-    console.error('Error fetching groups:', error);
-    return <div>Error loading groups</div>;
+    return <div>Error: {error}</div>;
   }
 
   return (
-    <div>
-      <h1>Groups List</h1>
-      <ul>
-        {groups.map((group) => (
-          <li key={group.id}>{group.name}</li>
-        ))}
-      </ul>
+    <div className="container mx-auto py-10">
+      <h1 className="text-2xl font-bold mb-4">Groups List</h1>
+      <GroupsList groups={groups} />
     </div>
   );
 };
 
-export default GroupsList;
+export default GroupsListPage;

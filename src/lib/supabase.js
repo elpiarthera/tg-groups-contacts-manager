@@ -4,22 +4,24 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-// Check for missing environment variables
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables');
-} else {
-  console.log('Supabase environment variables loaded successfully');
+let supabase;
+
+try {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Missing Supabase environment variables');
+  }
+
+  // Create a supabase client instance
+  supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+  // Log successful client creation only in development
+  if (process.env.NODE_ENV === 'development') {
+    console.log('Supabase client created successfully');
+  }
+} catch (error) {
+  console.error('Error initializing Supabase client:', error.message);
+  // You might want to set supabase to null or a mock client here
+  supabase = null;
 }
 
-// Create a supabase client instance
-export const supabase = createClient(
-  supabaseUrl,
-  supabaseAnonKey
-);
-
-// Log successful client creation
-console.log('Supabase client created successfully');
-
-// Remove or comment out these console.log statements
-// console.log('Supabase client created:', supabase);
-// console.log("Supabase Config Loaded");
+export { supabase };
