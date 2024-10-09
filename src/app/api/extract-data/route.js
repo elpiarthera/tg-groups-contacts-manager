@@ -264,14 +264,16 @@ async function handleDataExtraction(client, phoneNumber, extractType) {
         owner_id: phoneNumber,
       }));
     } else if (extractType === 'contacts') {
-      const contacts = await client.getContacts();
-      extractedData = contacts.map(contact => ({
-        user_id: contact.id.toString(),
-        first_name: contact.firstName,
-        last_name: contact.lastName,
-        username: contact.username,
-        phone_number: contact.phone,
-        is_mutual_contact: contact.mutualContact,
+      const result = await client.invoke(new Api.contacts.GetContacts({
+        hash: 0 // Use 0 to get all contacts
+      }));
+      extractedData = result.users.map(user => ({
+        user_id: user.id.toString(),
+        first_name: user.firstName,
+        last_name: user.lastName,
+        username: user.username,
+        phone_number: user.phone,
+        is_mutual_contact: user.mutualContact,
         owner_id: phoneNumber,
       }));
     } else {
