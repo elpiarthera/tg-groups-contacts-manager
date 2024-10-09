@@ -262,9 +262,6 @@ async function handleDataExtraction(client, phoneNumber, extractType, userId) {
         type: dialog.isChannel ? 'channel' : 'group',
         is_public: !!dialog.username,
         owner_id: userId,
-        creation_date: new Date().toISOString(),
-        description: dialog.about || '',
-        invite_link: dialog.inviteLink || '',
       }));
     } else if (extractType === 'contacts') {
       const result = await client.invoke(new Api.contacts.GetContacts({
@@ -272,12 +269,11 @@ async function handleDataExtraction(client, phoneNumber, extractType, userId) {
       }));
       extractedData = result.users.map(user => ({
         user_id: user.id.toString(),
-        first_name: user.firstName || '',
-        last_name: user.lastName || '',
-        username: user.username || '',
-        phone_number: user.phone || '',
+        first_name: user.firstName,
+        last_name: user.lastName,
+        username: user.username,
+        phone_number: user.phone,
         owner_id: userId,
-        extracted_at: new Date().toISOString(),
       }));
     } else {
       throw new Error('Invalid extract type specified');
