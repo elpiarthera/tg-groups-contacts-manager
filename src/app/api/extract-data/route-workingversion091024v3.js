@@ -253,33 +253,22 @@ async function handleSignInOrSignUp(client, phoneNumber, userData, validationCod
 async function handleDataExtraction(client, phoneNumber, extractType, userId) {
   let extractedData = [];
   try {
-    // First, get the user's ID from the users table
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('id')
-      .eq('phone_number', phoneNumber)
-      .single();
-
-    if (userError) throw userError;
-
-    const ownerUserId = userData.id;
-
     if (extractType === 'groups') {
-      const dialogs = await client.getDialogs({limit: 50});
+      const dialogs = await client.getDialogs({limit: 50}); // Limit to 50 to reduce processing time
       extractedData = dialogs.map(dialog => ({
         group_name: dialog.title,
         group_id: dialog.id.toString(),
         participant_count: dialog.participantsCount || 0,
         type: dialog.isChannel ? 'channel' : 'group',
         is_public: !!dialog.username,
-        owner_id: ownerUserId, // Use the user's ID from the users table
+        owner_id: userId,
         creation_date: new Date().toISOString(),
         description: dialog.about || '',
         invite_link: dialog.inviteLink || '',
       }));
     } else if (extractType === 'contacts') {
       const result = await client.invoke(new Api.contacts.GetContacts({
-        hash: 0
+        hash: 0 // Use 0 to get all contacts
       }));
       extractedData = result.users.map(user => ({
         user_id: user.id.toString(),
@@ -287,7 +276,7 @@ async function handleDataExtraction(client, phoneNumber, extractType, userId) {
         last_name: user.lastName || '',
         username: user.username || '',
         phone_number: user.phone || '',
-        owner_id: ownerUserId, // Use the user's ID from the users table
+        owner_id: userId,
         extracted_at: new Date().toISOString(),
       }));
     } else {
