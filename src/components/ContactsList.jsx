@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pagination } from "@/components/ui/pagination";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { supabase } from '@/lib/supabase';
 import { generateCSV } from '@/lib/csvUtils';
 import { toast } from 'react-hot-toast';
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { format } from 'date-fns';
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE_OPTIONS = [10, 20, 50, 100];
 
 export default function ContactsList() {
   const [contacts, setContacts] = useState([]);
@@ -20,23 +25,52 @@ export default function ContactsList() {
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleColumns, setVisibleColumns] = useState({
+    name: true,
+    username: true,
+    phone_number: true,
+    bio: true,
+    profile_photo_url: true,
+    is_bot: true,
+    extracted_at: true,
+    updated_at: true,
+  });
+
+  const columns = [
+    { key: 'name', label: 'Name' },
+    { key: 'username', label: 'Username' },
+    { key: 'phone_number', label: 'Phone Number' },
+    { key: 'bio', label: 'Bio' },
+    { key: 'profile_photo_url', label: 'Profile Photo' },
+    { key: 'is_bot', label: 'Bot' },
+    { key: 'extracted_at', label: 'Extracted At' },
+    { key: 'updated_at', label: 'Updated At' },
+  ];
 
   useEffect(() => {
     fetchContacts();
-  }, [currentPage]);
+  }, [currentPage, itemsPerPage, searchQuery]);
 
   const fetchContacts = async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const { data, error, count } = await supabase
+      let query = supabase
         .from('contacts')
-        .select('*', { count: 'exact' })
-        .range((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE - 1);
+        .select('*', { count: 'exact' });
+
+      if (searchQuery) {
+        query = query.or(`first_name.ilike.%${searchQuery}%,last_name.ilike.%${searchQuery}%,username.ilike.%${searchQuery}%,phone_number.ilike.%${searchQuery}%`);
+      }
+
+      const { data, error, count } = await query
+        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1);
 
       if (error) throw error;
-      setContacts(data || []); // Ensure contacts is always an array
-      setTotalPages(Math.ceil((count || 0) / ITEMS_PER_PAGE));
+      setContacts(data || []);
+      setTotalPages(Math.ceil((count || 0) / itemsPerPage));
     } catch (error) {
       console.error('Error fetching contacts:', error);
       setError('Failed to load contacts. Please try again.');
@@ -63,7 +97,7 @@ export default function ContactsList() {
     try {
       setIsExtracting(true);
       const selectedData = contacts.filter(contact => selectedContacts.includes(contact.id));
-      const csvContent = generateCSV(selectedData, ['id', 'first_name', 'last_name', 'username', 'phone_number', 'bio', 'online_status']);
+      const csvContent = generateCSV(selectedData, Object.keys(visibleColumns).filter(key => visibleColumns[key]));
       downloadCSV(csvContent, 'extracted_contacts.csv');
       toast.success('Contacts extracted successfully');
     } catch (error) {
@@ -89,6 +123,22 @@ export default function ContactsList() {
     }
   };
 
+  const handleSearchChange = (e) => {
+    setSearchQuery(e.target.value);
+    setCurrentPage(1);
+  };
+
+  const handleItemsPerPageChange = (value) => {
+    setItemsPerPage(Number(value));
+    setCurrentPage(1);
+  };
+
+  const toggleColumn = (columnKey) => {
+    setVisibleColumns(prev => ({ ...prev, [columnKey]: !prev[columnKey] }));
+  };
+
+  const visibleColumnsCount = useMemo(() => Object.values(visibleColumns).filter(Boolean).length, [visibleColumns]);
+
   if (isLoading) {
     return <div className="flex justify-center items-center h-screen">Loading...</div>;
   }
@@ -100,8 +150,45 @@ export default function ContactsList() {
   return (
     <div className="container mx-auto py-10">
       <h2 className="text-2xl font-bold mb-4">Contacts List</h2>
+      <div className="mb-4 flex justify-between items-center">
+        <Input
+          type="text"
+          placeholder="Search contacts..."
+          value={searchQuery}
+          onChange={handleSearchChange}
+          className="max-w-sm"
+        />
+        <div className="flex items-center space-x-2">
+          <Select value={itemsPerPage.toString()} onValueChange={handleItemsPerPageChange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Select items per page" />
+            </SelectTrigger>
+            <SelectContent>
+              {ITEMS_PER_PAGE_OPTIONS.map(option => (
+                <SelectItem key={option} value={option.toString()}>{option} per page</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">Columns</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-56">
+              {columns.map(column => (
+                <DropdownMenuCheckboxItem
+                  key={column.key}
+                  checked={visibleColumns[column.key]}
+                  onCheckedChange={() => toggleColumn(column.key)}
+                >
+                  {column.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
       {contacts.length === 0 ? (
-        <p>No contacts found. Try extracting contacts first.</p>
+        <p>No contacts found. Try adjusting your search or extracting contacts first.</p>
       ) : (
         <>
           <div className="mb-4 flex items-center">
@@ -114,39 +201,59 @@ export default function ContactsList() {
               {selectAll ? "Unselect All" : "Select All"}
             </label>
           </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Select</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Username</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Bio</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {contacts.map((contact) => (
-                <TableRow key={contact.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedContacts.includes(contact.id)}
-                      onCheckedChange={() => handleSelectContact(contact.id)}
-                    />
-                  </TableCell>
-                  <TableCell>{`${contact.first_name} ${contact.last_name}`}</TableCell>
-                  <TableCell>{contact.username}</TableCell>
-                  <TableCell>{contact.phone_number}</TableCell>
-                  <TableCell>{contact.bio}</TableCell>
-                  <TableCell>
-                    <span className={contact.online_status === 'Online' ? 'text-green-500' : 'text-gray-500'}>
-                      {contact.online_status || 'Offline'}
-                    </span>
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[50px]">Select</TableHead>
+                  {columns.map(column => visibleColumns[column.key] && (
+                    <TableHead key={column.key}>{column.label}</TableHead>
+                  ))}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {contacts.map((contact) => (
+                  <TableRow key={contact.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedContacts.includes(contact.id)}
+                        onCheckedChange={() => handleSelectContact(contact.id)}
+                      />
+                    </TableCell>
+                    {visibleColumns.name && (
+                      <TableCell>{`${contact.first_name} ${contact.last_name}`}</TableCell>
+                    )}
+                    {visibleColumns.username && (
+                      <TableCell>{contact.username}</TableCell>
+                    )}
+                    {visibleColumns.phone_number && (
+                      <TableCell>{contact.phone_number}</TableCell>
+                    )}
+                    {visibleColumns.bio && (
+                      <TableCell>{contact.bio}</TableCell>
+                    )}
+                    {visibleColumns.profile_photo_url && (
+                      <TableCell>
+                        <Avatar>
+                          <AvatarImage src={contact.profile_photo_url} alt={`${contact.first_name} ${contact.last_name}`} />
+                          <AvatarFallback>{contact.first_name[0]}{contact.last_name[0]}</AvatarFallback>
+                        </Avatar>
+                      </TableCell>
+                    )}
+                    {visibleColumns.is_bot && (
+                      <TableCell>{contact.is_bot ? 'Yes' : 'No'}</TableCell>
+                    )}
+                    {visibleColumns.extracted_at && (
+                      <TableCell>{format(new Date(contact.extracted_at), 'yyyy-MM-dd HH:mm:ss')}</TableCell>
+                    )}
+                    {visibleColumns.updated_at && (
+                      <TableCell>{format(new Date(contact.updated_at), 'yyyy-MM-dd HH:mm:ss')}</TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
           <div className="mt-4 flex justify-between items-center">
             <Button 
               onClick={handleExtract} 
