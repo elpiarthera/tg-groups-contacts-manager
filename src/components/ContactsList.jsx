@@ -4,35 +4,46 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Pagination } from "@/components/ui/pagination";
 import { supabase } from '@/lib/supabase';
 import { generateCSV } from '@/lib/csvUtils';
+import { toast } from 'react-hot-toast';
+
+const ITEMS_PER_PAGE = 20;
 
 export default function ContactsList() {
   const [contacts, setContacts] = useState([]);
   const [selectedContacts, setSelectedContacts] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
 
   useEffect(() => {
-    const fetchContacts = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('contacts')
-          .select('*'); // Ensure filtering by user_id if necessary
-
-        if (error) throw error;
-        setContacts(data);
-      } catch (error) {
-        console.error('Error fetching contacts:', error);
-        setError('Failed to load contacts. Please try again.');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     fetchContacts();
-  }, []);
+  }, [currentPage]);
+
+  const fetchContacts = async () => {
+    try {
+      setIsLoading(true);
+      const { data, error, count } = await supabase
+        .from('contacts')
+        .select('*', { count: 'exact' })
+        .range((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE - 1);
+
+      if (error) throw error;
+      setContacts(data);
+      setTotalPages(Math.ceil(count / ITEMS_PER_PAGE));
+    } catch (error) {
+      console.error('Error fetching contacts:', error);
+      setError('Failed to load contacts. Please try again.');
+      toast.error('Failed to load contacts');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSelectAll = () => {
     setSelectAll(!selectAll);
@@ -49,12 +60,17 @@ export default function ContactsList() {
 
   const handleExtract = async () => {
     try {
+      setIsExtracting(true);
       const selectedData = contacts.filter(contact => selectedContacts.includes(contact.id));
       const csvContent = generateCSV(selectedData, ['id', 'first_name', 'last_name', 'username', 'phone_number', 'bio', 'online_status']);
       downloadCSV(csvContent, 'extracted_contacts.csv');
+      toast.success('Contacts extracted successfully');
     } catch (error) {
       console.error('Error extracting contacts:', error);
       setError('Failed to extract contacts. Please try again.');
+      toast.error('Failed to extract contacts');
+    } finally {
+      setIsExtracting(false);
     }
   };
 
@@ -73,22 +89,26 @@ export default function ContactsList() {
   };
 
   if (isLoading) {
-    return <div>Loading...</div>;
+    return <div className="flex justify-center items-center h-screen">Loading...</div>;
   }
 
   if (error) {
-    return <div>Error: {error}</div>;
+    return <div className="text-red-500 text-center">{error}</div>;
   }
 
   return (
     <div className="container mx-auto py-10">
       <h2 className="text-2xl font-bold mb-4">Contacts List</h2>
-      <Checkbox
-        id="select-all"
-        checked={selectAll}
-        onCheckedChange={handleSelectAll}
-        label={selectAll ? "Unselect All" : "Select All"}
-      />
+      <div className="mb-4 flex items-center">
+        <Checkbox
+          id="select-all"
+          checked={selectAll}
+          onCheckedChange={handleSelectAll}
+        />
+        <label htmlFor="select-all" className="ml-2">
+          {selectAll ? "Unselect All" : "Select All"}
+        </label>
+      </div>
       <Table>
         <TableHeader>
           <TableRow>
@@ -122,7 +142,20 @@ export default function ContactsList() {
           ))}
         </TableBody>
       </Table>
-      <Button onClick={handleExtract} disabled={selectedContacts.length === 0}>Extract Selected Contacts</Button>
+      <div className="mt-4 flex justify-between items-center">
+        <Button 
+          onClick={handleExtract} 
+          disabled={selectedContacts.length === 0 || isExtracting}
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+        >
+          {isExtracting ? 'Extracting...' : `Extract Selected Contacts (${selectedContacts.length})`}
+        </Button>
+        <Pagination 
+          currentPage={currentPage} 
+          totalPages={totalPages} 
+          onPageChange={setCurrentPage} 
+        />
+      </div>
     </div>
   );
 }

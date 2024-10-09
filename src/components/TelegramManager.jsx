@@ -177,10 +177,18 @@ export default function TelegramManager() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  const navigateToContactsList = () => {
+    router.push('/contacts-list')
+  }
+
+  const navigateToGroupsList = () => {
+    router.push('/groups-list')
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
       <h1 className="text-4xl font-bold mb-8">Telegram Extractor</h1>
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md mb-4">
         <CardHeader>
           <CardTitle>Telegram Extractor</CardTitle>
         </CardHeader>
@@ -271,6 +279,22 @@ export default function TelegramManager() {
           )}
         </CardContent>
       </Card>
+      
+      {/* Navigation Buttons */}
+      <div className="flex space-x-4 mt-4">
+        <Button
+          onClick={navigateToContactsList}
+          className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
+        >
+          View Contacts List
+        </Button>
+        <Button
+          onClick={navigateToGroupsList}
+          className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+        >
+          View Groups List
+        </Button>
+      </div>
     </div>
   )
 }
