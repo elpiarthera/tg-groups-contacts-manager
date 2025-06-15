@@ -46,6 +46,11 @@ Before running tests for the Telegram Extractor project, ensure your development
     *   The primary testing framework will be [Jest](https://jestjs.io/), often paired with [React Testing Library](https://testing-library.com/docs/react-testing-library/intro/) for component testing. These should be listed in `devDependencies` in `package.json`.
     *   Consider `msw` (Mock Service Worker) for API mocking.
     *   For E2E testing, [Cypress](https://www.cypress.io/) or [Playwright](https://playwright.dev/) are recommended options.
+-   **E2E Testing Setup (Cypress):**
+    *   **Installation:** Cypress should be installed as a dev dependency: `npm install cypress --save-dev`.
+    *   **Configuration:** A `cypress.config.js` file in the project root configures Cypress (e.g., `baseUrl`, `specPattern`). (This file was created in a previous step).
+    *   **Project Structure:** Cypress tests are typically located in the `cypress/e2e/` directory.
+    *   **Browser:** Ensure you have a supported browser installed (e.g., Chrome, Firefox, Edge).
 -   **Configuration Files**:
     *   `jest.config.js` or Jest configuration within `package.json` (if Jest is set up).
     *   `.eslintrc.js` for linting rules, which should also apply to test files.
@@ -306,6 +311,7 @@ The testing strategy for the Telegram Extractor includes multiple test types to 
       // Add tests for 2FA flow, invalid inputs, logout, etc.
     });
     ```
+    *(Note: The example Cypress test for `auth_flow.cy.js` was created in a previous step and is more detailed than this snippet. This section in the strategy doc just points to its existence and purpose).*
 
 ### 4. Performance Tests
 -   **Purpose**: Ensure the application meets performance benchmarks (e.g., load time, API response time).
@@ -377,10 +383,24 @@ Run tests using the project’s package manager (`npm` or `yarn`) and the config
     ```bash
     # Open Cypress Test Runner (interactive mode)
     npx cypress open
-
-    # Run Cypress tests headlessly (e.g., for CI)
-    npx cypress run
+    # Or, if you add a script to package.json like "cy:open": "cypress open"
+    # npm run cy:open
     ```
+            *   **Run Cypress Tests Headlessly (CLI Mode):**
+                This command runs all Cypress tests found by your `specPattern` in a headless browser. Useful for CI environments.
+                ```bash
+                npx cypress run
+                # Or, with a script like "cy:run": "cypress run"
+                # npm run cy:run
+                ```
+            *   **Run Specific Cypress Test File(s):**
+                ```bash
+                npx cypress run --spec "cypress/e2e/your_spec_file.cy.js"
+                ```
+            *   **Important for E2E:**
+                *   Ensure your local development server is running (`npm run dev`) before executing Cypress tests if `baseUrl` in `cypress.config.js` points to `http://localhost:3000`.
+                *   E2E tests interact with a live (though possibly mocked backend) application, so the application must be served.
+        ```
 
 -   **Run End-to-End (E2E) tests (if using Playwright):**
     ```bash
@@ -712,7 +732,7 @@ The testing stack for the Telegram Extractor project primarily focuses on JavaSc
     -   **`ts-jest`** (if using TypeScript in tests): A Jest transformer with source map support to help Jest process TypeScript test files.
     -   **[Mock Service Worker (msw)](https://mswjs.io/)**: For mocking API requests (both client-side `fetch` calls and server-side API route interactions with external services like Supabase or the Telegram client library during tests). This allows for testing components and API routes in isolation.
     -   **[Supertest](https://github.com/ladjs/supertest)** (Optional, for API route integration testing): Can be used to make HTTP requests to Next.js API routes from within tests. Alternatively, direct handler invocation with mocked `req`/`res` objects can be used.
-    -   **[Cypress](https://www.cypress.io/) / [Playwright](https://playwright.dev/)** (Recommended for E2E): For end-to-end testing that simulates real user scenarios in a browser.
+    -   **[Cypress](https://www.cypress.io/)**: Recommended for End-to-End (E2E) testing, allowing simulation of real user scenarios in a browser. (Playwright is also a good alternative).
 
 -   **General Testing & Quality Tools**:
     -   **[ESLint](https://eslint.org/)**: For static code analysis to find problems and enforce coding standards in both application and test code.
