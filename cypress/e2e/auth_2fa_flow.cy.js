@@ -33,7 +33,10 @@ describe('Full Authentication Flow with 2FA', () => {
   });
 
   it('Scenario 1: Successfully authenticates with valid credentials, code, and 2FA password', () => {
-    // This intercept handles all stages of the 2FA flow for this specific test
+    // Note: The following intercept is defined to handle multiple stages of this specific 2FA test scenario.
+    // For even stricter control and to avoid potential cross-talk if more stages are added,
+    // one might consider refactoring this into multiple, more granular intercepts,
+    // each with .times(1) and a more specific request matcher for each distinct API call stage.
     cy.intercept('POST', '/api/extract-data', (req) => {
       const body = req.body;
       // Check if it's not a checkSession call, as that's handled by the beforeEach intercept
@@ -93,6 +96,8 @@ describe('Full Authentication Flow with 2FA', () => {
   });
 
   it('Scenario 2: Handles incorrect 2FA password', () => {
+    // Note: The following intercept is defined to handle multiple stages of this specific 2FA test scenario.
+    // Similar to Scenario 1, for stricter control, this could be refactored into more granular intercepts.
     cy.intercept('POST', '/api/extract-data', (req) => {
       const body = req.body;
       if (body.action === 'checkSession') return;

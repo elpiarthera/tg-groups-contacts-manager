@@ -2,7 +2,7 @@ const { defineConfig } = require('cypress');
 
 module.exports = defineConfig({
   e2e: {
-    baseUrl: 'http://localhost:3000', // Default Next.js dev server URL
+    baseUrl: process.env.CYPRESS_BASE_URL || 'http://localhost:3000', // Default Next.js dev server URL
     setupNodeEvents(on, config) {
       // implement node event listeners here
       // For example, if you need to log messages from Cypress to the terminal:

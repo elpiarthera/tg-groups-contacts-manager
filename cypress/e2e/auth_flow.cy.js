@@ -29,6 +29,8 @@ describe('Full Authentication Flow (API ID/Hash + Code)', () => {
   });
 
   it('Scenario 1: Successfully authenticates with valid credentials and code', () => {
+    // Note: The following intercepts are defined to handle specific stages of this test.
+    // For stricter control, consider refactoring into single-use intercepts with .times(1) for each distinct API call.
     // Mock for requesting code
     cy.intercept('POST', '/api/extract-data', (req) => {
       if (req.body.phoneNumber === testPhoneNumber && !req.body.validationCode && !req.body.action) { // Ensure it's the code request
@@ -84,6 +86,8 @@ describe('Full Authentication Flow (API ID/Hash + Code)', () => {
   });
 
   it('Scenario 4: Handles incorrect verification code', () => {
+    // Note: The following intercepts are defined to handle specific stages of this test.
+    // For stricter control, consider refactoring into single-use intercepts with .times(1) for each distinct API call.
     cy.intercept('POST', '/api/extract-data', (req) => {
       if (req.body.phoneNumber === testPhoneNumber && !req.body.validationCode && !req.body.action) {
         req.reply({
@@ -126,7 +130,7 @@ describe('Full Authentication Flow (API ID/Hash + Code)', () => {
           body: { success: true, requiresValidation: true, message: 'Validation code sent', phoneRegistered: true },
         });
       }
-    }).as('requestCodeDelayed');
+    }).as('requestCodeDelayed').times(1); // This intercept is for a single delayed code request in this test
 
     cy.get('input[id="api-id"]').type(testApiId);
     cy.get('input[id="api-hash"]').type(testApiHash);
