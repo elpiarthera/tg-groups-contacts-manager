@@ -41,7 +41,7 @@ This document tracks the testing status of various components and features of th
 
 | File Path         | Priority | Test Type | Status     | Test File Location             | Coverage | PR/Ticket Link | Notes                                                                                       |
 |-------------------|----------|-----------|------------|--------------------------------|----------|----------------|---------------------------------------------------------------------------------------------|
-| `lib/apiUtils.js` | High     | Unit      | ⚪️ Not Started | `lib/__tests__/apiUtils.test.js` (TBD) | ---      | ---            | Test error handlers, response formatters.                                                     |
+| `lib/apiUtils.js` | High     | Unit      | ✅ Tested  | `lib/__tests__/apiUtils.test.js` | ---      | ---            | Tested error handlers (`handleErrorResponse`, `handleTelegramError`, `handleSupabaseError`) for correct response structure and status codes. Tested `checkRateLimit` placeholder behavior. |
 | `lib/csvUtils.js` | High     | Unit      | ✅ Tested  | `lib/__tests__/csvUtils.test.js` | ---      | ---            | Added tests for `generateCSV`, including various data scenarios and error handling.         |
 | `lib/supabase.js` | Critical | N/A       | N/A        | N/A                            | ---      | ---            | Client initialization; tested implicitly via API route tests. No direct unit tests planned.     |
 | `lib/utils.js`    | Medium   | Unit      | ✅ Tested  | `lib/__tests__/utils.test.js`    | ---      | ---            | Added tests for `isValidPhoneNumber` and `cn` utilities. `cn` was made more robust.         |
