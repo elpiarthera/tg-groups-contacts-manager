@@ -458,6 +458,249 @@ A consistent file structure helps in locating and managing tests. For the Telegr
     });
     ```
 
+## Mocking
+
+Mocking is essential for isolating tests and controlling the behavior of dependencies. For the Telegram Extractor project, common mocking scenarios include:
+
+### Mocking Next.js Features
+
+-   **`next/navigation` (for `useRouter`, `usePathname`, etc.):**
+    When testing components that use Next.js navigation hooks, you'll need to mock them.
+    ```javascript
+    // __mocks__/next/navigation.js (create this file in your project's root __mocks__ folder)
+    // Or set up directly in your test setup file or individual test:
+    jest.mock('next/navigation', () => ({
+      useRouter: jest.fn(() => ({
+        push: jest.fn(),
+        replace: jest.fn(),
+        refresh: jest.fn(),
+        back: jest.fn(),
+        forward: jest.fn(),
+      })),
+      usePathname: jest.fn(() => '/mocked-path'),
+      useSearchParams: jest.fn(() => new URLSearchParams()),
+      // Mock other exports as needed
+    }));
+    ```
+    Then, in your tests, you can assert calls to `router.push` or provide different mock implementations.
+
+### Mocking API Requests (External and Internal)
+
+-   **Using `msw` (Mock Service Worker):**
+    `msw` is highly recommended for mocking API requests at the network level. It can intercept actual network requests and return mocked responses. This is useful for:
+    *   Testing React components that fetch data (e.g., `TelegramManager.jsx` calling `/api/extract-data`).
+    *   Integration testing Next.js API routes if they call external third-party APIs (though in this project, API routes primarily interact with the Telegram client and Supabase, which would be mocked differently).
+    *   Providing a consistent mocking layer for both client-side and Node.js environments (Jest tests).
+
+    -   **Example Setup for Jest (e.g., in `jest.setup.js` or a test file):**
+        ```javascript
+        // src/mocks/server.js (example setup)
+        import { setupServer } from 'msw/node';
+        import { rest } from 'msw';
+
+        export const handlers = [
+          rest.post('/api/extract-data', (req, res, ctx) => {
+            // Example: Mocking a successful code request
+            return res(ctx.status(200), ctx.json({ success: true, requiresValidation: true, message: 'Code sent' }));
+          }),
+          // Add more handlers for other endpoints or scenarios
+        ];
+
+        export const server = setupServer(...handlers);
+
+        // In your jest.setup.js or a specific test suite:
+        // beforeAll(() => server.listen());
+        // afterEach(() => server.resetHandlers());
+        // afterAll(() => server.close());
+        ```
+        *(The MSW setup example was already shown in the Integration Tests section, this reiterates its importance for API mocking in general)*
+
+### Mocking Specific Modules or Functions (Jest)
+
+-   **Supabase Client (`@/lib/supabase`):**
+    When testing API routes or components that directly interact with Supabase, you'll often mock the Supabase client methods.
+    ```javascript
+    // In your test file (e.g., an API route test)
+    jest.mock('@/lib/supabase', () => ({
+      supabase: {
+        from: jest.fn().mockReturnThis(),
+        select: jest.fn().mockResolvedValue({ data: [], error: null }),
+        insert: jest.fn().mockResolvedValue({ data: [{}], error: null }),
+        update: jest.fn().mockResolvedValue({ data: [{}], error: null }),
+        eq: jest.fn().mockReturnThis(), // For chaining .eq()
+        single: jest.fn().mockResolvedValue({ data: {}, error: null }),
+        auth: {
+          getUser: jest.fn().mockResolvedValue({ data: { user: { id: 'test-user-id'} }, error: null }),
+          signOut: jest.fn().mockResolvedValue({ error: null }),
+          // Add other auth methods as needed
+        },
+      },
+    }));
+    ```
+
+-   **Telegram Client Library (`telegram`):**
+    When testing the `/api/extract-data` route, you'll need to mock the `TelegramClient` methods.
+    ```javascript
+    // In your /api/extract-data test file
+    const mockTelegramClientInstance = {
+      connect: jest.fn().mockResolvedValue(true),
+      connected: true,
+      sendCode: jest.fn().mockResolvedValue({ phoneCodeHash: 'mocked_hash', phoneRegistered: true }),
+      signIn: jest.fn().mockResolvedValue({ user: { id: 'telegram-user-id' } }), // Mock user object as needed
+      invoke: jest.fn().mockResolvedValue({ users: [{ id: 'contact-id' }] }), // For GetContacts
+      iterDialogs: jest.fn(function*() { // Mocking an async iterator
+        yield { title: 'Test Group 1', id: 'g1', participantsCount: 10, isChannel: false, date: new Date() };
+        yield { title: 'Test Channel 1', id: 'c1', participantsCount: 100, isChannel: true, date: new Date() };
+      }),
+      session: {
+        save: jest.fn().mockReturnValue('mocked_session_string'),
+      },
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    };
+
+    jest.mock('telegram', () => ({
+      TelegramClient: jest.fn().mockImplementation(() => mockTelegramClientInstance),
+      sessions: {
+        StringSession: jest.fn().mockImplementation(() => ({})), // Mock StringSession constructor
+      },
+      Api: { // Mock any Api.something calls if used directly
+        contacts: {
+            GetContacts: jest.fn(params => ({ /* return structure for GetContacts */})),
+        },
+        auth: {
+            SignIn: jest.fn(params => ({ /* return structure for SignIn */})),
+            SignUp: jest.fn(params => ({ /* return structure for SignUp */})),
+        }
+      }
+    }));
+    ```
+
+### Mocking Browser Storage (localStorage/sessionStorage)
+
+-   If your application uses `localStorage` or `sessionStorage` (not explicitly seen in this project's core flow but common in web apps), you can mock it for Jest tests:
+    ```javascript
+    // In a test setup file or individual test
+    const mockLocalStorage = (() => {
+      let store = {};
+      return {
+        getItem: jest.fn((key) => store[key] || null),
+        setItem: jest.fn((key, value) => {
+          store[key] = value.toString();
+        }),
+        removeItem: jest.fn((key) => {
+          delete store[key];
+        }),
+        clear: jest.fn(() => {
+          store = {};
+        }),
+      };
+    })();
+
+    Object.defineProperty(window, 'localStorage', {
+      value: mockLocalStorage,
+    });
+    ```
+
+Choose the mocking strategy that best fits the test type and the dependency being mocked. The goal is to create reliable, isolated, and fast tests.
+
+## Code Coverage
+
+-   **Goal**: While aiming for high code coverage is generally good, the primary focus is on ensuring that critical paths and core functionalities are thoroughly tested. A target of **80-85%+** coverage for these areas is a practical goal.
+    **Important Note**: Code coverage is a useful metric for identifying untested parts of the codebase but is **not** a direct measure of test quality or a guarantee of bug-free software. Meaningful tests that verify actual behavior and edge cases are more important than achieving 100% coverage with trivial tests.
+-   **Tools**:
+    *   **Jest**: Use Jest's built-in code coverage capabilities (via the `--coverage` flag). It uses Istanbul under the hood.
+-   **Generate Report**:
+    Run the test script with the coverage flag:
+    ```bash
+    npm test -- --coverage
+    ```
+    This command typically outputs a coverage report to a `coverage/` directory in the project root.
+-   **Analyze Report**:
+    *   Open `coverage/lcov-report/index.html` in a browser to view the detailed interactive report.
+    *   Identify files and specific lines/branches/functions that are not covered.
+    *   Prioritize adding tests for uncovered critical logic.
+-   **Enforce Coverage (Optional in CI)**:
+    Jest allows setting coverage thresholds in its configuration (`jest.config.js` or `package.json`). If implemented, the build can be made to fail if coverage drops below these thresholds.
+    Example for `jest.config.js`:
+    ```javascript
+    // jest.config.js
+    module.exports = {
+      // ... other Jest configurations
+      coverageThreshold: {
+        global: {
+          branches: 80,
+          functions: 80,
+          lines: 80,
+          statements: 80,
+        },
+        // Per-file coverage can also be specified:
+        // './src/lib/criticalUtils.js': {
+        //   branches: 90,
+        //   statements: 90,
+        // },
+      },
+    };
+    ```
+
+## Continuous Integration (CI)
+
+Integrate testing into the CI/CD pipeline to automate the process and catch issues early.
+
+-   **Workflow**:
+    *   Run linters and all unit/integration tests automatically on every push to a branch and on every pull request targeting main branches (e.g., `main`, `develop`).
+    *   Optionally, run E2E tests on pull requests to a main branch or before merging to staging/production.
+    *   Fail the CI build if any tests fail or if code coverage thresholds (if set) are not met.
+-   **Recommended Tool: GitHub Actions** (as the project is likely hosted on GitHub).
+
+-   **Example GitHub Actions Workflow (`.github/workflows/ci.yml`)**:
+    ```yaml
+    name: Telegram Extractor CI
+
+    on:
+      push:
+        branches: [ main, develop ] # Adjust branches as needed
+      pull_request:
+        branches: [ main, develop ] # Adjust branches as needed
+
+    jobs:
+      test:
+        runs-on: ubuntu-latest
+
+        strategy:
+          matrix:
+            node-version: [18.x, 20.x] # Test on relevant Node versions
+
+        steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+
+        - name: Set up Node.js ${{ matrix.node-version }}
+          uses: actions/setup-node@v4
+          with:
+            node-version: ${{ matrix.node-version }}
+            cache: 'npm' # Cache npm dependencies
+
+        - name: Install dependencies
+          run: npm ci # Use 'npm ci' for cleaner installs in CI
+
+        - name: Run linters
+          run: npm run lint # Assuming 'lint' script exists in package.json
+
+        - name: Run tests with coverage
+          run: npm test -- --coverage
+
+        # Optional: Upload coverage report (e.g., to Codecov or as an artifact)
+        # - name: Upload coverage to Codecov
+        #   uses: codecov/codecov-action@v3
+        #   with:
+        #     token: ${{ secrets.CODECOV_TOKEN }} # If using Codecov
+        #     files: ./coverage/lcov.info
+        #     fail_ci_if_error: true
+    ```
+    *(Ensure `package.json` has a `lint` script, e.g., `"lint": "eslint ."` and a `test` script like `"test": "jest"`)*.
+
+This CI setup helps maintain code quality and ensures that new changes do not break existing functionality.
+
 ## Technologies Used
 
 The testing stack for the Telegram Extractor project primarily focuses on JavaScript/TypeScript tools suitable for a Next.js web application:
@@ -478,4 +721,38 @@ The testing stack for the Telegram Extractor project primarily focuses on JavaSc
     -   **`axe-core`** (via Jest or E2E tools): For automated accessibility testing to catch WCAG violations.
 
 This stack provides comprehensive tools for unit, integration, and end-to-end testing, along with utilities for maintaining code quality and performance.
+
+## Troubleshooting Common Testing Issues
+
+-   **Missing Dependencies for Tests**: Ensure all `devDependencies` related to testing (Jest, React Testing Library, `msw`, `jest-axe`, etc.) are correctly installed. Run `npm install` if in doubt.
+-   **Module Resolution Errors in Jest**: If Jest cannot find modules (especially with path aliases like `@/*`), ensure `jest.config.js` has the correct `moduleNameMapper` configuration to resolve these aliases (e.g., mapping `@/(.*)` to `<rootDir>/src/$1`).
+-   **Mocking Issues**:
+    *   Ensure mocks are correctly scoped (e.g., using `jest.mock` at the top of the test file).
+    *   Reset mocks between tests using `jest.resetAllMocks()` or `jest.clearAllMocks()` in `beforeEach` or `afterEach` to prevent tests from influencing each other.
+    *   Verify that `msw` handlers are correctly defined and the mock server is running for integration tests relying on API mocks.
+-   **Flaky E2E Tests**:
+    *   Increase default timeouts in Cypress/Playwright configuration if tests fail due to slow loading.
+    *   Use explicit waits (`cy.wait('@alias')`, `page.waitForSelector()`) instead of fixed-time waits (`cy.wait(1000)`).
+    *   Ensure the test environment and data are stable and reset between test runs.
+-   **Code Coverage Gaps**: Use the generated HTML coverage report (`coverage/lcov-report/index.html`) to pinpoint exactly which lines or branches are not being covered. Add specific tests for these cases.
+-   **Environment Variable Issues**: Ensure `.env.local` is correctly set up and that environment variables are accessible to the test environment as expected. Jest's `dotenv` integration or manual loading might be needed.
+
+## Best Practices for Testing
+
+-   **Keep Tests Fast and Independent**: Optimize test execution time. Each test should be able to run on its own and in any order.
+-   **Test Real-World Scenarios**: Focus on testing how users will interact with the application and critical business logic.
+-   **Write Readable Tests**: Treat your test code like production code. It should be clear, concise, and well-documented (e.g., using descriptive names, AAA pattern).
+-   **Avoid Over-Mocking**: Mock external dependencies and services, but avoid mocking internal implementation details that are part of what you're trying to test.
+-   **Refactor Tests with Code**: When production code changes, update corresponding tests to ensure they remain accurate and relevant.
+-   **Review Test Code**: Include test code in your regular code review process.
+-   **Focus on Critical Paths**: Prioritize testing for the most important features and user flows.
+-   **Don't Aim for 100% Coverage Blindly**: While high coverage is good, focus on the quality and relevance of tests rather than just the percentage.
+
+## Monitoring and Maintenance of Test Suite
+
+-   **Regularly Review Test Coverage**: Check code coverage reports (e.g., weekly or bi-weekly) to identify any new gaps in testing.
+-   **Analyze CI Test Failures**: Log and analyze test failures from the CI pipeline. Identify patterns or frequently failing (flaky) tests and prioritize fixing them.
+-   **Refactor and Update Tests**: As the application evolves, refactor tests to keep them up-to-date with code changes and new features. Remove obsolete tests.
+-   **Optimize Slow Tests**: Periodically review test execution times. Optimize slow tests, especially if they are impacting CI build times significantly.
+-   **Keep Test Dependencies Updated**: Regularly update testing libraries and frameworks to benefit from new features and bug fixes.
 ```
