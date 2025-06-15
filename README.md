@@ -18,9 +18,11 @@ A Next.js web application that allows users to extract their Telegram groups and
 
 ## Features
 
-- **Telegram Authentication:** Securely connect to your Telegram account using your API ID, API Hash, and phone number with a one-time verification code.
+- **Secure Telegram Authentication:** Connect to your Telegram account using API ID, API Hash, and phone number. Credentials like API ID/Hash are not stored persistently in the database.
+- **2FA Support:** Handles Telegram accounts with Two-Factor Authentication (password) enabled.
 - **Session Management:** User sessions are managed via Supabase, allowing for persistent authentication.
-- **Group Extraction:** Fetch a list of your Telegram groups and channels, including details like name, ID, participant count, and type.
+- **Session Logout:** Provides a logout feature to clear the current session.
+- **Group Extraction:** Fetch a list of your Telegram groups and channels, including details like name, ID, participant count, and type. Supports fetching all groups/channels (not limited to an initial small batch).
 - **Contact Extraction:** Retrieve your Telegram contacts list with information such as name, username, and phone number.
 - **Data Storage:** Extracted groups and contacts are saved to a Supabase PostgreSQL database.
 - **View and Export Data:** Browse extracted data within the application and export it in CSV format for offline use.
@@ -102,14 +104,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY"
 **Supabase Setup:**
 
 You'll also need to set up the necessary tables in your Supabase database. The primary tables used are:
--   `users`: Stores user information, Telegram session strings, and API credentials.
-    - Key columns might include: `id` (UUID, primary key), `created_at`, `telegram_id` (integer), `first_name`, `last_name`, `username`, `photo_url`, `phone_number` (text, unique), `api_id` (integer), `api_hash` (text), `session_string` (text), `phoneCodeHash` (text), `code_request_time` (timestamp), `phone_registered` (boolean).
+-   `users`: Stores user information and Telegram session strings.
+    - Key columns might include: `id` (UUID, primary key, default `uuid_generate_v4()`), `created_at` (timestamp with time zone, default `now()`), `telegram_id` (integer, unique, for bot auth), `first_name` (text), `last_name` (text), `username` (text), `photo_url` (text), `phone_number` (text, unique), `session_string` (text), `phoneCodeHash` (text), `code_request_time` (timestamp with time zone), `phone_registered` (boolean).
+    - **Note:** `api_id` and `api_hash` are no longer stored in this table for improved security.
 -   `groups`: Stores extracted Telegram group information.
-    - Key columns might include: `id` (UUID, primary key), `group_name`, `group_id` (text), `participant_count`, `type`, `is_public`, `owner_id` (foreign key to `users.id`), `creation_date`, `description`, `invite_link`.
+    - Key columns might include: `id` (UUID, primary key, default `uuid_generate_v4()`), `group_name` (text), `group_id` (text), `participant_count` (integer), `type` (text, e.g., 'group', 'channel'), `is_public` (boolean), `owner_id` (UUID, foreign key to `users.id`), `creation_date` (timestamp with time zone), `description` (text), `invite_link` (text), `extracted_at` (timestamp with time zone, default `now()`).
 -   `contacts`: Stores extracted Telegram contact information.
-    - Key columns might include: `id` (UUID, primary key), `user_id` (text), `first_name`, `last_name`, `username`, `phone_number`, `owner_id` (foreign key to `users.id`), `extracted_at`.
+    - Key columns might include: `id` (UUID, primary key, default `uuid_generate_v4()`), `user_id` (text, Telegram user ID), `first_name` (text), `last_name` (text), `username` (text), `phone_number` (text), `owner_id` (UUID, foreign key to `users.id`), `extracted_at` (timestamp with time zone, default `now()`).
 
-*You may need to refer to the application code (`/api/extract-data/route.js`) for the exact schema and create these tables in the Supabase SQL editor or table editor.*
+*You may need to refer to the application code (e.g., `/app/api/extract-data/route.js`) for the exact schema details and create these tables in the Supabase SQL editor or table editor.*
 
 ### Running the Development Server
 
@@ -132,21 +135,26 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 The application uses Next.js API routes to handle backend logic. Key endpoints include:
 
 -   **`POST /api/extract-data`**:
-    -   **Purpose:** Handles the core functionality of Telegram authentication and data extraction.
+    -   **Purpose:** Handles the core functionality of Telegram authentication (including 2FA password submission) and data extraction.
     -   **Process:**
-        1.  Receives user's Telegram API ID, API Hash, and phone number.
+        1.  Receives user's Telegram API ID, API Hash, and phone number. Can also receive `validationCode` or `twoFactorPassword`.
         2.  Manages session checking with Supabase.
         3.  If no active session or code required: Sends a verification code request to Telegram. Stores `phoneCodeHash` in Supabase.
-        4.  If validation code is provided: Verifies the code with Telegram. On success, establishes a session (saves `session_string` to Supabase).
-        5.  If `extractType` (groups or contacts) is provided with an active session: Fetches the requested data from Telegram.
+        4.  If validation code is provided (and optionally 2FA password): Verifies credentials with Telegram. On success, establishes a session (saves `session_string` to Supabase).
+        5.  If `extractType` (groups or contacts) is provided with an active session: Fetches the requested data from Telegram. `iterDialogs` is used for fetching all groups/channels.
         6.  Stores extracted data (`groups` or `contacts`) into the respective Supabase tables.
-    -   **Request Body (example):** `{ "apiId": 12345, "apiHash": "your_api_hash", "phoneNumber": "+1234567890", "extractType": "groups", "validationCode": "12345" (optional), "action": "checkSession" (optional) }`
-    -   **Responses:** Varies based on the step; indicates success, failure, or if validation code is required.
+    -   **Request Body (example):** `{ "apiId": 12345, "apiHash": "your_api_hash", "phoneNumber": "+1234567890", "extractType": "groups", "validationCode": "12345" (optional), "twoFactorPassword": "your2FApassword" (optional), "action": "checkSession" (optional) }`
+    -   **Responses:** Varies based on the step; indicates success, failure, or if validation code or 2FA password is required.
 
 -   **`POST /api/auth/telegram`**:
-    -   **Purpose:** Handles authentication using a Telegram Bot Token. This might be used for features like a "Login with Telegram" widget.
-    -   **Process:** Verifies authentication data received from Telegram (usually via a callback after user interaction with a bot) and upserts user information into the Supabase `users` table.
+    -   **Purpose:** Handles authentication using a Telegram Bot Token (e.g., for "Login with Telegram" widget).
+    -   **Process:** Verifies authentication data received from Telegram and upserts user information into the Supabase `users` table.
     -   **Request Body (example):** `{ "id": 123, "first_name": "John", "last_name": "Doe", ... , "hash": "telegram_provided_hash" }`
+
+-   **`POST /api/auth/logout`**:
+    -   **Purpose:** Clears the user's session from the server by removing the `session_string` from the `users` table in Supabase.
+    -   **Request Body:** `{ "phoneNumber": "user_phone_number" }`
+    -   **Response:** `{ "success": true, "message": "Logged out successfully." }` or an error response.
 
 *Refer to the source code in `src/app/api/` for detailed implementation.*
 
@@ -161,6 +169,7 @@ A brief overview of the key directories:
 -   **`src/`**: Main application code.
     -   **`app/`**: Next.js App Router.
         -   **`api/`**: Backend API routes.
+            -   `auth/logout/route.js`: Logout endpoint.
             -   `auth/telegram/route.js`: Telegram bot authentication endpoint.
             -   `extract-data/route.js`: Core data extraction and Telegram client logic.
         -   `contacts/page.js`: Page to display the list of extracted contacts.
@@ -212,3 +221,7 @@ This project is configured for easy deployment using [Vercel](https://vercel.com
     -   Click the "Deploy" button. Vercel will build and deploy your application.
 
 Once deployed, Vercel will provide you with a URL for your live application.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

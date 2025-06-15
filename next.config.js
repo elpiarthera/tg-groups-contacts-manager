@@ -9,7 +9,8 @@ const nextConfig = {
   },
   typescript: {
     // It's recommended to remove this in production and fix type errors
-    ignoreBuildErrors: true,
+    // Changed to false to enable stricter TypeScript checking
+    ignoreBuildErrors: false,
   },
   experimental: {
     esmExternals: 'loose',
