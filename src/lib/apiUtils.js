@@ -1,10 +1,9 @@
 import { FloodWaitError, errors } from 'telegram'; // FloodWaitError and errors are not explicitly used, consider removing if not needed.
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+// Removed: import { createClient } from '@supabase/supabase-js';
 
 /**
  * @typedef {import('next/server').NextResponse} NextResponse
- * @typedef {import('@supabase/supabase-js').SupabaseClient} SupabaseClient
  * @typedef {import('@supabase/supabase-js').PostgrestError} PostgrestError
  */
 
@@ -12,11 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 const MAX_REQUESTS_PER_MINUTE = 20; // Example: 20 requests per minute
 const WINDOW_SIZE_IN_SECONDS = 60;  // Example: 1 minute window
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-/** @type {SupabaseClient} */
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Removed Supabase client initialization and export from this file
 
 /**
  * Placeholder for distributed rate limiting.
@@ -24,12 +19,38 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
  * @returns {Promise<void>}
  */
 export async function checkRateLimit(identifier) {
-  // This is a placeholder for a distributed rate limiting mechanism using a KV store like Vercel KV.
+  // IMPORTANT: This rate limiter is currently a placeholder and does NOT implement actual rate limiting.
+  // It also does NOT function correctly in a distributed serverless environment (e.g., Vercel)
+  // as each serverless instance would have its own independent counter if it were memory-based.
+  // For production, replace this with a robust solution using a distributed store
+  // like Vercel KV, Redis, or a similar service to maintain global rate limits.
+  // The conceptual logic for KV store interaction is commented out below for reference.
   console.warn(
-    `[RATE LIMIT WARN]: Distributed rate limiting not implemented. Identifier: ${identifier}. ` +
-    `Consider using Vercel KV or similar for production.`
+    `[RATE LIMIT WARN]: Distributed rate limiting not implemented or bypassed. Identifier: ${identifier}. ` +
+    `This is a placeholder and NOT suitable for production in a serverless environment. ` +
+    `Consider using Vercel KV or similar.`
   );
-  
+
+  // Conceptual logic for Vercel KV (or similar Redis-compatible store):
+  // 1. Connect to Vercel KV store here.
+  //    e.g., const kv = createClient({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+
+  // 2. Define key and current timestamp.
+  //    const current_timestamp = Math.floor(Date.now() / 1000);
+  //    const key = \`rate_limit:\${identifier}\`; // e.g., rate_limit:user_ip_placeholder
+
+  // 3. Increment count and set expiry if it's a new key for the window.
+  //    const currentCount = await kv.incr(key);
+  //    if (currentCount === 1) {
+  //      await kv.expire(key, WINDOW_SIZE_IN_SECONDS);
+  //    }
+
+  // 4. Check against the limit.
+  //    if (currentCount > MAX_REQUESTS_PER_MINUTE) {
+  //      console.error(\`Rate limit exceeded for identifier: \${identifier}, count: \${currentCount}\`);
+  //      // throw handleErrorResponse('Rate limit exceeded. Please try again later.', 429);
+  //    }
+
   // For now, this function will not actually block requests.
   return;
 }
@@ -48,7 +69,7 @@ export async function handleTelegramError(error) {
   if (message.includes('PHONE_NUMBER_INVALID') || errorMessage.includes('PHONE_NUMBER_INVALID')) {
     return NextResponse.json({
       success: false,
-      message: 'Invalid phone number. Please check and try again.' // Simplified error structure
+      message: 'Invalid phone number. Please check and try again.'
     }, { status: 400 });
   }
   if (message.includes('PHONE_CODE_INVALID') || errorMessage.includes('PHONE_CODE_INVALID')) {
@@ -61,7 +82,7 @@ export async function handleTelegramError(error) {
     return NextResponse.json({
       success: false,
       message: 'Verification code has expired. Please request a new one.',
-      code: 'PHONE_CODE_EXPIRED' // Keep specific code for frontend if used
+      code: 'PHONE_CODE_EXPIRED'
     }, { status: 400 });
   }
   if (message.includes('SESSION_PASSWORD_NEEDED') || errorMessage === 'SESSION_PASSWORD_NEEDED') {
@@ -77,9 +98,7 @@ export async function handleTelegramError(error) {
       message: 'The provided API credentials are invalid or have been revoked.'
     }, { status: 401 });
   }
-  // Add other specific Telegram errors here if needed
 
-  // Generic fallback for other Telegram errors
   return NextResponse.json({
     success: false,
     message: errorMessage || message || 'An unexpected Telegram error occurred. Please try again later.',
@@ -95,10 +114,10 @@ export async function handleTelegramError(error) {
 export function handleSupabaseError(error) {
   console.error('Supabase error:', error);
   /** @type {any} */
-  const err = error; // To access potential 'message' property
+  const err = error;
   return NextResponse.json({
     success: false,
-    message: 'Database operation failed.', // Simplified error structure
+    message: 'Database operation failed.',
     details: err.message ? err.message : String(err)
   }, { status: 500 });
 }
@@ -113,7 +132,7 @@ export function handleSupabaseError(error) {
 export function handleErrorResponse(message, status = 500, error = null) {
   console.error('[ERROR RESPONSE]:', message, error);
   /** @type {any} */
-  const err = error; // To access potential 'message' or 'stack'
+  const err = error;
   let details;
   if (err) {
     details = err.message ? err.message : String(err);
@@ -124,7 +143,7 @@ export function handleErrorResponse(message, status = 500, error = null) {
 
   return NextResponse.json({
     success: false,
-    message, // Main message for the user
-    details: details, // More specific error details if available
+    message,
+    details: details,
   }, { status });
 }

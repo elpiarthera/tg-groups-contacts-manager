@@ -1,62 +1,68 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+// Import the shared Supabase client instance
+import { supabase } from '@/lib/supabase';
 import { handleErrorResponse } from '@/lib/apiUtils';
 
 /**
  * @typedef {import('next/server').NextRequest} NextRequest
  * @typedef {import('next/server').NextResponse} NextResponse
- * @typedef {import('@supabase/supabase-js').SupabaseClient} SupabaseClient
  */
-
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-/** @type {SupabaseClient} */
-const supabase = createClient(supabaseUrl, supabaseKey);
 
 /**
  * Handles POST requests for user logout.
+ * This endpoint now expects a JWT in the Authorization header for authentication.
  * @param {NextRequest} req - The incoming Next.js request object.
  * @returns {Promise<NextResponse>} A Next.js response object.
  */
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const { phoneNumber } = body;
+    const authHeader = req.headers.get('authorization');
+    const jwt = authHeader?.split('Bearer ')[1];
 
-    if (!phoneNumber || typeof phoneNumber !== 'string') { // Added type check for phoneNumber
-      return handleErrorResponse('Phone number is required and must be a string for logout.', 400);
+    if (!jwt) {
+      return handleErrorResponse('No JWT provided. Unauthorized.', 401);
     }
 
-    console.log(`[LOGOUT ATTEMPT]: Phone number: ${phoneNumber}`);
+    // Verify JWT and get user
+    const { data: { user }, error: authError } = await supabase.auth.getUser(jwt);
 
-    const { data, error } = await supabase
+    if (authError) {
+      console.error('[LOGOUT AUTH ERROR]:', authError);
+      return handleErrorResponse('Authentication failed. Invalid JWT.', 401, authError);
+    }
+    if (!user) {
+      console.warn('[LOGOUT AUTH WARN]: No user found for the provided JWT.');
+      return handleErrorResponse('Authentication failed. No user found for token.', 403);
+    }
+
+    console.log(`[LOGOUT ATTEMPT]: Authenticated user ID: ${user.id}`);
+
+    // Update the user's record to clear session-related fields using their authenticated ID
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         session_string: null,
         phoneCodeHash: null,
         code_request_time: null
       })
-      .eq('phone_number', phoneNumber)
-      .select();
+      .eq('id', user.id); // Use the authenticated user's ID from the JWT
 
-    if (error) {
-      console.error('[LOGOUT SUPABASE ERROR]:', error);
-      return handleErrorResponse('Supabase error during logout.', 500, error);
+    if (updateError) {
+      console.error('[LOGOUT SUPABASE UPDATE ERROR]:', updateError);
+      return handleErrorResponse('Supabase error during logout process.', 500, updateError);
     }
 
-    if (!data || data.length === 0) {
-      console.log(`[LOGOUT INFO]: No user found with phone number ${phoneNumber} to logout or already logged out.`);
-    }
+    // Note: We don't use .select() anymore, so we don't check `data.length`.
+    // The operation is successful if updateError is null.
+    // It's fine if the user record was already "logged out" (null session_string).
 
-    console.log(`[LOGOUT SUCCESS]: Cleared session for phone number: ${phoneNumber}`);
+    console.log(`[LOGOUT SUCCESS]: Cleared session for user ID: ${user.id}`);
     return NextResponse.json({ success: true, message: 'Logged out successfully.' });
 
   } catch (error) {
-    console.error('[LOGOUT API ERROR]:', /** @type {Error} */ (error));
-    if (error instanceof SyntaxError) {
-        return handleErrorResponse('Invalid JSON in request body.', 400, error);
-    }
+    console.error('[LOGOUT API UNEXPECTED ERROR]:', /** @type {Error} */ (error));
+    // req.json() is not called anymore, so SyntaxError for body parsing is less likely unless other JSON is processed.
+    // However, keeping a general catch-all is good.
     return handleErrorResponse('An unexpected error occurred during logout.', 500, error);
   }
 }

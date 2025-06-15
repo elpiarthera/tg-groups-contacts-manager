@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { supabase } from '@/lib/supabase'; // Import supabase client
 
 const CODE_EXPIRATION_TIME = 30 * 60; // 30 minutes in seconds
 
@@ -50,6 +51,19 @@ export default function TelegramManager() {
       if (phoneNumber && apiId && apiHash) {
         setIsLoading(true)
         try {
+          // Check Supabase session first, as this is more lightweight
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+             // To confirm this session is linked to the entered phone, apiId, apiHash,
+             // we might need a specific check if these details are part of the JWT claims
+             // or if the backend /api/extract-data 'checkSession' is more robust.
+             // For now, if Supabase has a session, assume it's valid for the app.
+            console.log('[DEBUG] Supabase session found:', session);
+            // We need to ensure this session is for the *current* details if they are re-entered.
+            // The backend checkSession in /api/extract-data is tied to phone number.
+            // Let's rely on the existing backend check for now to link phone to session.
+          }
+
           const response = await fetch('/api/extract-data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -60,7 +74,6 @@ export default function TelegramManager() {
               apiHash
             }),
           });
-          // Try to parse JSON regardless of response.ok to get backend error message
           const data = await response.json();
           if (!response.ok) {
             throw new Error(data.message || 'Failed to check session');
@@ -106,17 +119,18 @@ export default function TelegramManager() {
   /** @param {boolean} [is2FASubmit=false] */
   const validateInputs = (is2FASubmit = false) => {
     if (!is2FASubmit && !isAuthenticated) {
-        if (!apiId || isNaN(parseInt(apiId)) || parseInt(apiId) <= 0) { // Check parseInt(apiId)
+        // API ID validation: Ensure it's a positive number.
+        if (!apiId || isNaN(parseInt(apiId, 10)) || parseInt(apiId, 10) <= 0) {
           setError('API ID must be a valid positive number'); return false;
         }
-        if (!apiHash || !/^[a-f0-9]{32}$/.test(apiHash)) {
+        // API Hash validation: Ensure it's a 32-character hex string (case-insensitive).
+        if (!apiHash || !/^[a-f0-9]{32}$/i.test(apiHash)) {
           setError('API Hash should be a 32-character hexadecimal string'); return false;
         }
         if (!phoneNumber || !/^\+[1-9]\d{1,14}$/.test(phoneNumber.trim())) {
           setError('Valid phone number with country code required (e.g., +1234567890)'); return false;
         }
     }
-    // These checks apply even if authenticated but inputs are shown (which shouldn't happen with current logic, but good for safety)
     if (showValidationInput && !validationCode && !is2FASubmit) {
         setError('Please enter the validation code.'); return false;
     }
@@ -159,21 +173,20 @@ export default function TelegramManager() {
       const data = await response.json();
 
       if (!response.ok) {
-        // Prefer message from backend response, default if not present
         throw new Error(data.message || `Server error: ${response.statusText} (${response.status})`);
       }
 
       if (data.requires2FA) {
         setShow2FAInput(true);
-        setError(null); // Clear previous errors
+        setError(null);
         setSuccessMessage(data.message || '2FA required. Enter password.');
       } else if (data.requiresValidation) {
         setShowValidationInput(true)
-        setShow2FAInput(false) // Reset 2FA if back to code validation
+        setShow2FAInput(false)
         setTwoFactorPassword('')
         setCodeRequestTime(Date.now())
         setTimeRemaining(CODE_EXPIRATION_TIME)
-        setIsPhoneRegistered(data.phoneRegistered === true) // Ensure boolean
+        setIsPhoneRegistered(data.phoneRegistered === true)
         setSuccessMessage(data.message || `Validation code sent. ${data.phoneRegistered ? '' : 'New user will be signed up.'}`)
       } else if (data.success) {
         setIsAuthenticated(true)
@@ -182,14 +195,13 @@ export default function TelegramManager() {
         setTwoFactorPassword('')
         setValidationCode('')
         setSuccessMessage(data.message || 'Operation successful!')
-        // Check if data extraction happened
         if (data.data && Array.isArray(data.data)) {
              setSuccessMessage(data.message || `Extracted ${data.data.length} ${extractType}.`)
              setTimeout(() => router.push(`/${extractType}-list`), 2000)
-        } else if (isAuthenticated && payload.extractType) { // If was authenticated and extractType was set for the call
+        } else if (isAuthenticated && payload.extractType) {
             setSuccessMessage(data.message || `Data extraction for ${extractType} initiated.`);
         }
-      } else { // General failure from API (e.g. data.success === false but not specific known cases)
+      } else {
         setError(data.message || 'An unexpected error occurred.')
         setShow2FAInput(false)
         setTwoFactorPassword('')
@@ -209,17 +221,44 @@ export default function TelegramManager() {
     setError(null);
     setSuccessMessage(null);
     try {
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: phoneNumber.trim() }),
-      });
-      const data = await response.json();
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || 'Logout failed.');
+      if (!token) {
+        // If no token, perhaps the session expired or user is already effectively logged out from Supabase perspective.
+        // Still, try to clear local state.
+        console.warn('[LOGOUT WARN]: No active Supabase session token found. Clearing local state.');
+        // Proceed to clear local state anyway, but a server call might not be possible or necessary.
+        // If the backend /api/auth/logout strictly requires JWT, this call would fail.
+        // However, the backend now *requires* JWT, so this path means logout won't hit backend.
+        // This is acceptable as there's no server session to clear if no JWT.
       }
 
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // The backend now relies on JWT for user ID, so empty body is fine.
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({}), // Send empty JSON object as body
+      });
+
+      const responseData = await response.json();
+
+      if (!response.ok || !responseData.success) {
+        // If token was missing, this backend call might fail with 401, which is fine.
+        // The goal is to clear client state regardless.
+        if (response.status === 401 && !token) {
+            console.log('[LOGOUT INFO]: No active session to logout on server. Local state cleared.');
+        } else {
+            throw new Error(responseData.message || 'Logout failed.');
+        }
+      }
+
+      // Clear all local state regardless of backend response if token was initially missing
       setApiId('');
       setApiHash('');
       setPhoneNumber('');
@@ -233,10 +272,24 @@ export default function TelegramManager() {
       setIsPhoneRegistered(null);
       setExtractType('groups');
       setSuccessMessage('Logged out successfully.');
+      // Also clear Supabase client-side session explicitly
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+          console.error('[LOGOUT SUPABASE SIGN OUT ERROR]:', signOutError);
+          // Don't overwrite main error, but log it.
+      }
+
 
     } catch (error) {
       console.error('[LOGOUT ERROR]:', /** @type {Error} */ (error));
       setError(/** @type {Error} */ (error).message || 'Logout failed. Please try again.');
+      // Even on error, try to clear sensitive local state for security
+      setIsAuthenticated(false);
+      setHasExistingSession(false);
+      setShowValidationInput(false);
+      setShow2FAInput(false);
+      setValidationCode('');
+      setTwoFactorPassword('');
     } finally {
       setIsLoading(false);
     }

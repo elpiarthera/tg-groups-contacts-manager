@@ -104,8 +104,17 @@ export async function POST(req) {
 
     const { apiId, apiHash, phoneNumber, extractType, validationCode, action, twoFactorPassword } = body;
 
+    const maskPhoneNumber = (pn) => {
+      if (!pn || typeof pn !== 'string' || pn.length < 6) return pn; // or return '***';
+      return `${pn.substring(0, 3)}****${pn.substring(pn.length - 2)}`;
+    };
+
     console.log('[DEBUG]: Received payload:', { 
-      apiId, apiHash, phoneNumber, extractType, action,
+      apiId, // Assuming apiId is not as sensitive as a session token for logging purposes
+      apiHash: apiHash ? 'Provided' : 'Not provided', // Mask actual apiHash value
+      phoneNumber: phoneNumber ? maskPhoneNumber(phoneNumber) : 'Not provided',
+      extractType,
+      action,
       validationCode: validationCode ? 'Provided' : 'Not provided',
       twoFactorPassword: twoFactorPassword ? 'Provided' : 'Not provided',
     });
@@ -140,7 +149,15 @@ export async function POST(req) {
     const validPhoneNumber = phoneNumber.trim();
     console.log('[DEBUG]: Valid phone number:', validPhoneNumber);
 
-    await checkRateLimit("user_ip_placeholder");
+    // TODO: Implement proper IP address retrieval for rate limiting.
+    // In a Vercel environment (especially with Edge Functions / NextRequest):
+    // - User's IP: `req.ip` (Vercel automatically provides this)
+    // - Alternatively, check `req.headers.get('x-forwarded-for')`. This might contain a list of IPs;
+    //   the first one is often the client's IP. e.g., `(req.headers.get('x-forwarded-for') || '').split(',')[0].trim()`
+    // - For Node.js runtime (less common for new Next.js API routes): `req.socket.remoteAddress`
+    //   (but headers like 'x-forwarded-for' are more reliable behind proxies).
+    // Choose the most reliable method for your deployment environment.
+    await checkRateLimit(req.ip || req.headers.get('x-forwarded-for') || "user_ip_placeholder");
 
     /** @type {{data: UserDataFromDB | null, error: any}} */
     const { data: userData, error: fetchError } = await supabase
@@ -378,7 +395,7 @@ async function handleDataExtraction(passedClient, phoneNumber, extractType, user
           type: dialog.isChannel ? 'channel' : 'group',
           is_public: !!dialog.entity?.username,
           owner_id: ownerUserId,
-          creation_date: dialog.date ? new Date(dialog.date * 1000).toISOString() : new Date().toISOString(),
+          creation_date: dialog.date instanceof Date ? dialog.date.toISOString() : (typeof dialog.date === 'number' ? new Date(dialog.date * 1000).toISOString() : new Date().toISOString()),
           description: dialog.message?.message || '',
           invite_link: '',
         };
