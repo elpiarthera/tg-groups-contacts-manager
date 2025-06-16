@@ -320,6 +320,18 @@ export default function TelegramManager() {
           <CardTitle>Telegram Account Details</CardTitle>
         </CardHeader>
         <CardContent>
+          <p className="text-sm text-muted-foreground mb-4 -mt-2"> {/* Added -mt-2 for tighter spacing if needed */}
+            You can obtain your API ID and API Hash from{' '}
+            <a
+              href="https://my.telegram.org/apps"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-primary"
+            >
+              my.telegram.org/apps
+            </a>
+            {' '}after logging in with your phone number.
+          </p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="api-id">API ID</Label>
