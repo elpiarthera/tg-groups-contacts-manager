@@ -452,7 +452,7 @@ async function handleDataExtraction(passedClient, phoneNumber, extractType, user
   } catch (error) {
     console.error(`[API /api/extract-data] Error in handleDataExtraction for ${extractType}:`, error);
     console.error(`[DATA EXTRACTION ERROR for ${extractType}]:`, /** @type {Error} */ (error));
-    throw new Error(`Failed to extract ${extractType}: ${error.message}`);
+    throw new Error(`Failed to extract ${extractType}: ${error.message}`, { cause: error });
   }
 }
 
