@@ -93,11 +93,17 @@ export async function POST(req) {
   /** @type {TelegramClient|undefined} */
   let client;
   try {
-    console.log('[START]: Handling API Request');
+    console.log('[API /api/extract-data] POST request received');
+    console.log('[START]: Handling API Request'); // Existing log, keeping it for now
     let body;
     try {
       body = await req.json();
+      console.log('[API /api/extract-data] Request body:', body);
+      if (body && body.action) {
+        console.log('[API /api/extract-data] Action:', body.action);
+      }
     } catch (error) {
+      console.error('[API /api/extract-data] Error parsing request body:', error); // Enhanced log
       console.error('[ERROR]: Failed to parse request body', error);
       return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
     }
@@ -126,6 +132,7 @@ export async function POST(req) {
         .eq('phone_number', phoneNumber)
         .single();
       if (sessionError && sessionError.code !== 'PGRST116') { // PGRST116: row not found, not an error for checkSession
+        console.error('[API /api/extract-data] Supabase error during checkSession select:', sessionError);
         console.error('[SESSION CHECK SUPABASE ERROR]:', sessionError);
         return handleErrorResponse('Error checking session.', 500, sessionError);
       }
@@ -167,6 +174,7 @@ export async function POST(req) {
       .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') {
+      console.error('[API /api/extract-data] Supabase error fetching user details:', fetchError);
       console.error('[FETCH ERROR]:', fetchError);
       return handleErrorResponse('Error retrieving user data. Please try again.', 500);
     }
@@ -354,6 +362,9 @@ async function handleSignInOrSignUp(passedClient, phoneNumber, userData, validat
     });
 
   } catch (error) {
+    console.error('[API /api/extract-data] Telegram client connection error:', error);
+    console.error('[API /api/extract-data] Error in handleCodeRequest:', error);
+    console.error('[API /api/extract-data] Error in handleSignInOrSignUp:', error);
     console.error('[SIGN IN/UP ERROR SPECIFIC]:', error);
     throw error;
   }
@@ -439,8 +450,9 @@ async function handleDataExtraction(passedClient, phoneNumber, extractType, user
       data: extractedData,
     });
   } catch (error) {
+    console.error(`[API /api/extract-data] Error in handleDataExtraction for ${extractType}:`, error);
     console.error(`[DATA EXTRACTION ERROR for ${extractType}]:`, /** @type {Error} */ (error));
-    throw new Error(`Failed to extract ${extractType}: ${error.message}`);
+    throw new Error(`Failed to extract ${extractType}: ${error.message}`, { cause: error });
   }
 }
 
